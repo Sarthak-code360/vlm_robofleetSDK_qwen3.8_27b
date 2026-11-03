@@ -1,0 +1,17 @@
+{
+  "_comment": "Live status snapshot. Later this comes from Redis/Postgres; for now it is a file.",
+  "robots": [
+    {"id": "RBT-001", "zone": "Zone A3",         "battery": 78, "status": "busy", "current_task": "Picking items",     "queued_tasks": []},
+    {"id": "RBT-002", "zone": "Conveyor B1",     "battery": 62, "status": "busy", "current_task": "Transporting",      "queued_tasks": []},
+    {"id": "RBT-003", "zone": "Packing Station", "battery": 88, "status": "busy", "current_task": "Packing",           "queued_tasks": []},
+    {"id": "RBT-004", "zone": "Loading Zone",    "battery": 45, "status": "busy", "current_task": "Moving to pickup",  "queued_tasks": []}
+  ],
+  "pending_tasks": [
+    {"id": "T-901", "type": "transport", "from_zone": "Loading Zone", "to_zone": "Packing Station", "priority": "urgent", "battery_cost": 30},
+    {"id": "T-902", "type": "pick",      "from_zone": "Zone A3",      "to_zone": "Conveyor B1",     "priority": "normal", "battery_cost": 10},
+    {"id": "T-903", "type": "transport", "from_zone": "Conveyor B1",  "to_zone": "Packing Station", "priority": "normal", "battery_cost": 15}
+  ],
+  "alerts": [
+    {"source": "RBT-002 camera", "zone": "Conveyor B1", "text": "Spilled boxes partially blocking the aisle next to the conveyor."}
+  ]
+}

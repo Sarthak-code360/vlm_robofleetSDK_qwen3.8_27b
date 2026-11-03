@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robofleet"
+version = "0.1.0"
+description = "Coordinate robot fleets (factory, warehouse, hotel) with a vision-language model, plus Bambu Lab 3D printer control."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Sarthak-code360" }]
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["robotics", "fleet", "vlm", "llm", "qwen", "bambu", "3d-printing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.optional-dependencies]
+printer = ["paho-mqtt>=2.0"]
+
+[project.urls]
+Homepage = "https://github.com/Sarthak-code360/robofleet"
+Documentation = "https://github.com/Sarthak-code360/robofleet#readme"
+Issues = "https://github.com/Sarthak-code360/robofleet/issues"
+Changelog = "https://github.com/Sarthak-code360/robofleet/blob/main/CHANGELOG.md"
+
+[project.scripts]
+robofleet = "robofleet.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,13 @@
+config/printer.json
+.venv/
+jobs/
+logs/
+prints/*.gcode.3mf
+__pycache__/
+*.egg-info/
+build/
+dist/
+*.jpeg
+*.jpg
+*.png
+.DS_Store

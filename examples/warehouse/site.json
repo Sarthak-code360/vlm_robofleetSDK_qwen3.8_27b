@@ -1,0 +1,35 @@
+{
+  "name": "Demo warehouse",
+  "type": "warehouse",
+  "_comment": "Fixed knowledge: map, chargers and rules. This is the 'description file' from the architecture diagram.",
+  "zones": {
+    "Zone A3": {
+      "x": 0,
+      "y": 0
+    },
+    "Conveyor B1": {
+      "x": 20,
+      "y": 0
+    },
+    "Packing Station": {
+      "x": 20,
+      "y": 15
+    },
+    "Loading Zone": {
+      "x": 40,
+      "y": 10
+    },
+    "Charging Bay": {
+      "x": 0,
+      "y": 15
+    }
+  },
+  "chargers": [
+    "Charging Bay"
+  ],
+  "rules": {
+    "battery_reserve_pct": 20,
+    "charge_threshold_pct": 25,
+    "max_queued_tasks_per_robot": 1
+  }
+}
