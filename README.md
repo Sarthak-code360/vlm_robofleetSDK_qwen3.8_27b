@@ -1,6 +1,6 @@
 # robofleet
 
-[![CI](https://github.com/Sarthak-code360/robofleet/actions/workflows/ci.yml/badge.svg)](https://github.com/Sarthak-code360/robofleet/actions/workflows/ci.yml)
+[![CI](https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b/actions/workflows/ci.yml/badge.svg)](https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/robofleet)](https://pypi.org/project/robofleet/)
 [![Python](https://img.shields.io/pypi/pyversions/robofleet)](https://pypi.org/project/robofleet/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -63,7 +63,7 @@ pip install "robofleet[printer]"
 Latest development version from GitHub:
 
 ```sh
-pip install "robofleet[printer] @ git+https://github.com/Sarthak-code360/robofleet.git"
+pip install "robofleet[printer] @ git+https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b.git"
 ```
 
 ## Quick start
@@ -71,7 +71,7 @@ pip install "robofleet[printer] @ git+https://github.com/Sarthak-code360/robofle
 No model needed. This runs the rule-based planner on the example warehouse:
 
 ```sh
-git clone https://github.com/Sarthak-code360/robofleet.git && cd robofleet
+git clone https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b.git && cd vlm_robofleetSDK_qwen3.8_27b
 pip install -e .
 robofleet plan --site examples/warehouse/site.json --fleet examples/warehouse/fleet_state.json --offline
 ```
@@ -228,7 +228,7 @@ robofleet printer job (--request TEXT | --stl FILE | --sliced FILE) [--dry-run] 
 ## Development
 
 ```sh
-git clone https://github.com/Sarthak-code360/robofleet.git && cd robofleet
+git clone https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b.git && cd vlm_robofleetSDK_qwen3.8_27b
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[printer]"
 python -m unittest discover -s tests -t .

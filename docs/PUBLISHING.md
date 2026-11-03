@@ -10,7 +10,7 @@ PyPI **trusted publishing**. No PyPI password or token is stored anywhere.
 2. On PyPI, go to **Your projects > Publishing > Add a new pending publisher** and enter:
    - PyPI project name: `robofleet`
    - Owner: `Sarthak-code360`
-   - Repository name: `robofleet`
+   - Repository name: `vlm_robofleetSDK_qwen3.8_27b`
    - Workflow name: `publish.yml`
    - Environment name: `pypi`
 3. Do the same on TestPyPI with environment name `testpypi`.

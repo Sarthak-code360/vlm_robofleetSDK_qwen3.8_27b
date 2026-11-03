@@ -27,10 +27,10 @@ classifiers = [
 printer = ["paho-mqtt>=2.0"]
 
 [project.urls]
-Homepage = "https://github.com/Sarthak-code360/robofleet"
-Documentation = "https://github.com/Sarthak-code360/robofleet#readme"
-Issues = "https://github.com/Sarthak-code360/robofleet/issues"
-Changelog = "https://github.com/Sarthak-code360/robofleet/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b"
+Documentation = "https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b#readme"
+Issues = "https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b/issues"
+Changelog = "https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b/blob/main/CHANGELOG.md"
 
 [project.scripts]
 robofleet = "robofleet.cli:main"

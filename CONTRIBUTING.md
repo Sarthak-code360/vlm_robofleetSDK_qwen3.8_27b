@@ -5,7 +5,7 @@ Thanks for helping. Issues and pull requests are welcome.
 ## Set up
 
 ```sh
-git clone https://github.com/Sarthak-code360/robofleet.git && cd robofleet
+git clone https://github.com/Sarthak-code360/vlm_robofleetSDK_qwen3.8_27b.git && cd vlm_robofleetSDK_qwen3.8_27b
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[printer]"
 python -m unittest discover -s tests -t .
