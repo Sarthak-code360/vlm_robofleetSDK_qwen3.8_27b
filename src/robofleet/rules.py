@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import math
 
+from .validator import BLOCKED_STATUSES
+
 
 def distance(site: dict, zone_a: str, zone_b: str) -> float:
     a, b = site["zones"][zone_a], site["zones"][zone_b]
@@ -36,7 +38,7 @@ def rule_based_plan(site: dict, fleet: dict) -> dict:
         candidates = [
             r for r in fleet["robots"]
             if r["id"] not in taken
-            and r["status"] not in {"fault", "charging"}
+            and r["status"] not in BLOCKED_STATUSES
             and len(r.get("queued_tasks", [])) < rules["max_queued_tasks_per_robot"]
             and r["battery"] - task["battery_cost"] >= rules["battery_reserve_pct"]
         ]

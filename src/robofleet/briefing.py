@@ -19,7 +19,7 @@ Hard rules (a validator will reject plans that break them):
 - Only use robot IDs, task IDs and zone names that appear in the briefing.
 - Assign each task to at most one robot, and each robot at most one new task.
 - A robot's battery minus the battery_cost of its new task must stay at or above battery_reserve_pct.
-- Never assign tasks to robots with status "fault" or "charging".
+- Never assign tasks to robots with status "fault", "charging" or "offline".
 - target_zone must be a known zone for go_to_zone, otherwise null.
 
 Prefer urgent tasks first, then the nearest suitable robot. Take alerts and
@@ -41,7 +41,8 @@ def build_briefing(site: dict, fleet: dict) -> str:
         "pending_tasks": fleet["pending_tasks"],
         "alerts": fleet.get("alerts", []),
     }
-    return "Current fleet briefing:\n" + json.dumps(briefing, indent=2)
+    # Compact JSON: fewer tokens, so faster answers on small local GPUs.
+    return "Current fleet briefing:\n" + json.dumps(briefing, separators=(",", ":"))
 
 
 def image_part(path: str | Path) -> dict:

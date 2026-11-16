@@ -1,27 +1,40 @@
 """Command line tool: ``robofleet <command>``.
 
-  robofleet plan --site site.json --fleet fleet_state.json [--offline] [--image cam.jpg]
-  robofleet model-check ["message"]
-  robofleet printer status
-  robofleet printer list
-  robofleet printer ask "print the cube" [--dry-run]
-  robofleet printer job --request "40 mm cube" | --stl part.stl | --sliced part.gcode.3mf [--dry-run]
+Autonomous factory:
+  robofleet factory serve --config examples/actuator_factory/factory.json [--simulate-machines]
+  robofleet robot sim --count 10                 # 10 simulated robots
+  robofleet robot run --id RBT-001 --exec 'bash real/run_fast.sh {instruction}'   # a real robot
+  robofleet factory request "print the actuator housing"
+  robofleet factory confirm JOB-0001
+  robofleet factory status
 
-Model settings come from VLM_BASE_URL, VLM_MODEL, VLM_API_KEY / OPENROUTER_API_KEY and VLM_THINKING=off.
+Single printer:
+  robofleet printer status | list | ask "print the cube" [--dry-run]
+
+Fleet planning only:
+  robofleet plan --site site.json --fleet fleet_state.json [--offline]
+  robofleet model-check ["message"]
+
+Model settings: VLM_BASE_URL, VLM_MODEL, VLM_API_KEY / OPENROUTER_API_KEY, VLM_THINKING=off.
+Factory settings: ROBOFLEET_SERVER (default http://127.0.0.1:8080), ROBOFLEET_TOKEN.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
+import os
+import random
 import sys
+import threading
 import time
 from pathlib import Path
 
 from .briefing import build_briefing
 from .coordinator import Coordinator, load_json
 from .model import ModelClient, ModelError
+
+DEFAULT_SERVER = "http://127.0.0.1:8080"
 
 
 def _stop(text: str) -> None:
@@ -33,13 +46,7 @@ def _step(text: str) -> None:
     print(f"\n-> {text}")
 
 
-def _append_jsonl(path: Path, record: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
-        f.write(json.dumps(record, default=str) + "\n")
-
-
-# ---------------------------------------------------------------- fleet
+# ---------------------------------------------------------------- fleet planning
 
 def _print_plan(title: str, plan: dict, rejected: list[str]) -> None:
     print(f"\n=== {title} ===")
@@ -85,7 +92,7 @@ def cmd_model_check(args) -> None:
     print(f"time:     {stats['latency_s']} s   tokens: {stats['usage']}")
 
 
-# ---------------------------------------------------------------- printer
+# ---------------------------------------------------------------- single printer
 
 def _printer_config(path: Path) -> dict:
     if not path.exists():
@@ -110,27 +117,8 @@ def cmd_printer_list(args) -> None:
     print("\n".join(files) if files else f"No *.gcode.3mf files in {args.prints}")
 
 
-def _confirm_and_print(printer, path: Path, pcfg: dict, skip_confirm: bool) -> str:
-    from .printers import check_printer_ready
-
-    _step("Checking the printer")
-    problems = check_printer_ready(printer.status())
-    if problems:
-        _stop("; ".join(problems))
-    print("   printer is idle")
-    if not skip_confirm:
-        if input(f"\nPrint {path.name} now? Make sure the bed is clear. Type PRINT to start: ").strip() != "PRINT":
-            _stop("not confirmed")
-    _step("Uploading to printer")
-    url = printer.upload(path)
-    _step("Starting print")
-    printer.start_print(url, use_ams=pcfg.get("use_ams", False))
-    print("   sent. Watch progress with: robofleet printer status")
-    return url
-
-
 def cmd_printer_ask(args) -> None:
-    from .printers import NO_FILE, BambuPrinter, choose_print_file, list_print_files
+    from .printers import NO_FILE, BambuPrinter, check_printer_ready, choose_print_file, list_print_files
 
     files = list_print_files(args.prints)
     if not files:
@@ -151,64 +139,132 @@ def cmd_printer_ask(args) -> None:
         return
 
     pcfg = _printer_config(args.config)["printer"]
-    url = _confirm_and_print(BambuPrinter.from_config(pcfg), Path(args.prints) / choice["file"], pcfg, args.yes)
-    _append_jsonl(Path("logs/print_jobs.jsonl"),
-                  {"ts": time.time(), "request": request, "choice": choice, "stats": stats, "started": url})
+    printer = BambuPrinter.from_config(pcfg)
+    _step("Checking the printer")
+    problems = check_printer_ready(printer.status())
+    if problems:
+        _stop("; ".join(problems))
+    print("   printer is idle")
+    if not args.yes and input(f"\nPrint {choice['file']} now? Make sure the bed is clear. Type PRINT to start: ").strip() != "PRINT":
+        _stop("not confirmed")
+    _step("Uploading to printer")
+    url = printer.upload(Path(args.prints) / choice["file"])
+    _step("Starting print")
+    printer.start_print(url, use_ams=pcfg.get("use_ams", False))
+    print("   sent. Watch progress with: robofleet printer status")
 
 
-def cmd_printer_job(args) -> None:
-    from .printers import (BambuPrinter, CadError, SlicerError, check_size, design_part, render_stl,
-                           slice_stl, stl_size)
+# ---------------------------------------------------------------- factory
 
-    config = _printer_config(args.config)
-    pcfg = config["printer"]
-    job_dir = Path("jobs") / time.strftime("%Y%m%d-%H%M%S")
-    job_dir.mkdir(parents=True, exist_ok=True)
-    record: dict = {"ts": time.time(), "dir": str(job_dir)}
+def _client(args):
+    from .factory import FactoryClient
 
-    stl, sliced = args.stl, args.sliced
-    if args.request:
-        record["request"] = args.request
-        _step("Asking the model to design the part")
-        try:
-            design, stats = design_part(ModelClient.from_env(), args.request, pcfg["build_volume_mm"])
-        except (ModelError, CadError) as e:
-            _stop(str(e))
-        name = re.sub(r"[^a-z0-9_]+", "_", design["name"].lower()).strip("_") or "part"
-        print(f"   {name}: expected {design['expected_size_mm']} mm ({stats['latency_s']} s)")
-        print(f"   notes: {design['notes']}")
-        record.update(design=design, stats=stats)
-        scad = job_dir / f"{name}.scad"
-        scad.write_text(design["openscad"])
-        stl = job_dir / f"{name}.stl"
-        _step("Rendering the model with OpenSCAD")
-        try:
-            render_stl(config.get("openscad", "openscad"), scad, stl)
-        except (CadError, FileNotFoundError) as e:
-            _stop(f"{e}\n   The OpenSCAD code is saved at {scad}")
+    return FactoryClient(args.server, args.token)
 
-    if stl:
-        _step("Checking part size")
-        size = stl_size(stl)
-        print(f"   actual size: {size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} mm")
-        problems = check_size(size, pcfg["build_volume_mm"])
-        if problems:
-            _stop("; ".join(problems))
-        record["size_mm"] = size
-        sliced = job_dir / f"{Path(stl).stem}.gcode.3mf"
-        _step("Slicing with Bambu Studio")
-        try:
-            slice_stl(config["slicer"], Path(stl), sliced)
-        except (SlicerError, FileNotFoundError) as e:
-            _stop(str(e))
-        print(f"   {sliced}")
 
-    if args.dry_run:
-        print(f"\nDry run finished. Files are in {job_dir}")
-        return
+def cmd_factory_serve(args) -> None:
+    from .factory import load_factory, serve
 
-    record["started"] = _confirm_and_print(BambuPrinter.from_config(pcfg), Path(sliced), pcfg, args.yes)
-    _append_jsonl(Path("logs/print_jobs.jsonl"), record)
+    model = None if args.offline else ModelClient.from_env()
+    try:
+        factory = load_factory(args.config, model, simulate_machines=args.simulate_machines, log_path=args.log)
+    except (ValueError, FileNotFoundError, KeyError) as e:
+        _stop(str(e))
+    except ImportError as e:
+        _stop(f"{e}\n   Or run with --simulate-machines to use simulated printers.")
+    where = f"http://{'localhost' if args.host in {'127.0.0.1', '0.0.0.0'} else args.host}:{args.port}"
+    print(f"Factory '{factory.config.get('name')}' running")
+    print(f"  dashboard: {where}/" + (f"#token={args.token}" if args.token else ""))
+    print(f"  model:     {model.model + ' at ' + model.base_url if model else 'none (keywords + rules)'}")
+    print(f"  machines:  {', '.join(f'{m.id} ({type(m).__name__})' for m in factory.machines.values())}")
+    print(f"  robots:    {len(factory.robots)} configured; they appear online when they send heartbeats")
+    print(f"  events:    {args.log}\nCtrl+C to stop.", flush=True)
+    serve(factory, args.host, args.port, args.token)
+
+
+def cmd_factory_request(args) -> None:
+    text = " ".join(args.text)
+    if not text:
+        _stop('Say what you need, e.g.  robofleet factory request "print the actuator housing"')
+    print(f"-> asking the factory: {text}")
+    result = _client(args).request(text)
+    print(f"   {'OK' if result['ok'] else 'NOT DONE'}: {result['summary']}  [{result.get('model', {}).get('latency_s')} s]")
+    job = result.get("job")
+    if job and job["status"] == "awaiting_confirmation":
+        if args.confirm:
+            print(f"   {_client(args).confirm(job['id'])['id']} confirmed, starting")
+        else:
+            print(f"   waiting for confirmation: robofleet factory confirm {job['id']}  (or the Start button on the dashboard)")
+
+
+def cmd_factory_confirm(args) -> None:
+    job = _client(args).confirm(args.job_id)
+    print(f"{job['id']}: {job['status']}")
+
+
+def cmd_factory_status(args) -> None:
+    s = _client(args).state()
+    print(f"{s['factory']['name']}  (model: {s['factory']['model'] or 'none'})")
+    print("\nMACHINES")
+    for m in s["machines"]:
+        progress = f" {m['progress_pct']}%" if m.get("progress_pct") is not None else ""
+        print(f"  {m['id']:<12} {m['state']:<8} {m['zone']:<18}{progress} {m.get('job') or ''}")
+    print("\nROBOTS")
+    for r in s["robots"]:
+        print(f"  {r['id']:<10} {r['status']:<9} {str(r['zone']):<20} {r['battery']:>3}%  {', '.join(r['active_tasks'])}")
+    print("\nJOBS")
+    for j in s["jobs"][:10]:
+        print(f"  {j['id']}  {j['status']:<22} {j['machine_id']} {j['file']} -> {j['deliver_to']}  {j.get('task_id') or ''}")
+    print("\nTASKS")
+    for t in s["tasks"][:10]:
+        print(f"  {t['id']}  {t['status']:<12} {t['robot_id'] or '-':<9} {t['from_zone']} -> {t['to_zone']}")
+    print("\nRECENT EVENTS")
+    for e in s["events"][:10]:
+        print(f"  {time.strftime('%H:%M:%S', time.localtime(e['ts']))}  {e['text']}")
+
+
+# ---------------------------------------------------------------- robots
+
+def _robot_defaults(client) -> tuple[dict, dict]:
+    state = client.state()
+    return state["zones"], {r["id"]: r for r in state["robots"]}
+
+
+def cmd_robot_run(args) -> None:
+    from .factory import CommandExecutor, RobotAgent, SimulatedExecutor
+
+    client = _client(args)
+    zones, robots = _robot_defaults(client)
+    known = robots.get(args.id, {})
+    zone = args.zone or known.get("zone") or next(iter(zones))
+    executor = CommandExecutor(args.exec) if args.exec else SimulatedExecutor(zones, args.speed)
+    agent = RobotAgent(client, args.id, executor, zone=zone, battery=args.battery, name=args.name)
+    try:
+        agent.run_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+def cmd_robot_sim(args) -> None:
+    from .factory import RobotAgent, SimulatedExecutor
+
+    client = _client(args)
+    zones, robots = _robot_defaults(client)
+    ids = list(robots)[: args.count] or [f"RBT-{i:03d}" for i in range(1, args.count + 1)]
+    ids += [f"RBT-{i:03d}" for i in range(len(ids) + 1, args.count + 1)]
+    rng = random.Random(args.seed)
+    stop = threading.Event()
+    for robot_id in ids:
+        zone = robots.get(robot_id, {}).get("zone") or rng.choice(list(zones))
+        agent = RobotAgent(client, robot_id, SimulatedExecutor(zones, args.speed), zone=zone,
+                           battery=rng.randint(30, 95), interval_s=2.0)
+        threading.Thread(target=agent.run_forever, args=(stop,), daemon=True).start()
+    print(f"{len(ids)} simulated robots connected to {client.base_url}. Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        stop.set()
 
 
 # ---------------------------------------------------------------- entry point
@@ -218,20 +274,56 @@ def build_parser() -> argparse.ArgumentParser:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("plan", help="run one fleet coordination cycle")
-    p.add_argument("--site", type=Path, required=True, help="site file: zones, chargers, rules")
-    p.add_argument("--fleet", type=Path, required=True, help="fleet state: robots, pending tasks, alerts")
-    p.add_argument("--image", type=Path, action="append", default=[], help="camera snapshot (repeatable)")
-    p.add_argument("--offline", action="store_true", help="skip the model, use rules only")
-    p.add_argument("--show-briefing", action="store_true", help="print what the model reads")
-    p.add_argument("--log", type=Path, default=Path("logs/decisions.jsonl"), help="JSONL decision log")
-    p.set_defaults(func=cmd_plan)
+    # factory
+    factory = sub.add_parser("factory", help="autonomous factory: serve, request, confirm, status")
+    fsub = factory.add_subparsers(dest="factory_command", required=True)
 
-    p = sub.add_parser("model-check", help="send one message to the model")
-    p.add_argument("message", nargs="*")
-    p.set_defaults(func=cmd_model_check)
+    def with_server(sp: argparse.ArgumentParser) -> argparse.ArgumentParser:
+        sp.add_argument("--server", default=os.environ.get("ROBOFLEET_SERVER", DEFAULT_SERVER))
+        sp.add_argument("--token", default=os.environ.get("ROBOFLEET_TOKEN"), help="API token (or ROBOFLEET_TOKEN)")
+        return sp
 
-    printer = sub.add_parser("printer", help="Bambu Lab printer commands")
+    sp = fsub.add_parser("serve", help="run the factory brain (API + dashboard + control loop)")
+    sp.add_argument("--config", type=Path, required=True, help="factory file, e.g. examples/actuator_factory/factory.json")
+    sp.add_argument("--simulate-machines", action="store_true", help="use simulated printers instead of real ones")
+    sp.add_argument("--offline", action="store_true", help="no model: keyword matching + rule-based dispatch")
+    sp.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to accept robots on the network")
+    sp.add_argument("--port", type=int, default=8080)
+    sp.add_argument("--token", default=os.environ.get("ROBOFLEET_TOKEN"), help="require this API token")
+    sp.add_argument("--log", type=Path, default=Path("logs/factory_events.jsonl"))
+    sp.set_defaults(func=cmd_factory_serve)
+
+    sp = with_server(fsub.add_parser("request", help="ask the factory to do something"))
+    sp.add_argument("text", nargs="*")
+    sp.add_argument("--confirm", action="store_true", help="also confirm the job (only if the machine is safe to start)")
+    sp.set_defaults(func=cmd_factory_request)
+
+    sp = with_server(fsub.add_parser("confirm", help="confirm a job may start"))
+    sp.add_argument("job_id")
+    sp.set_defaults(func=cmd_factory_confirm)
+
+    with_server(fsub.add_parser("status", help="machines, robots, jobs, tasks")).set_defaults(func=cmd_factory_status)
+
+    # robots
+    robot = sub.add_parser("robot", help="connect robots to a factory")
+    rsub = robot.add_subparsers(dest="robot_command", required=True)
+    sp = with_server(rsub.add_parser("run", help="run the agent for one robot"))
+    sp.add_argument("--id", required=True)
+    sp.add_argument("--name")
+    sp.add_argument("--zone", help="starting zone (default: from the factory file)")
+    sp.add_argument("--battery", type=float, default=100)
+    sp.add_argument("--exec", help="command per task, e.g. 'bash real/run_fast.sh {instruction}'. Without it: simulated")
+    sp.add_argument("--speed", type=float, default=1.0, help="simulated speed, metres per second")
+    sp.set_defaults(func=cmd_robot_run)
+
+    sp = with_server(rsub.add_parser("sim", help="run several simulated robots"))
+    sp.add_argument("--count", type=int, default=10)
+    sp.add_argument("--speed", type=float, default=1.0)
+    sp.add_argument("--seed", type=int, default=1)
+    sp.set_defaults(func=cmd_robot_sim)
+
+    # single printer
+    printer = sub.add_parser("printer", help="one Bambu Lab printer, without the factory")
     psub = printer.add_subparsers(dest="printer_command", required=True)
 
     def printer_cmd(name: str, func, help_text: str) -> argparse.ArgumentParser:
@@ -243,25 +335,37 @@ def build_parser() -> argparse.ArgumentParser:
 
     printer_cmd("status", cmd_printer_status, "is the printer reachable and idle?")
     printer_cmd("list", cmd_printer_list, "files the model can choose from")
-
     sp = printer_cmd("ask", cmd_printer_ask, "model picks a ready-made file and prints it")
     sp.add_argument("request", nargs="*", help="what to print, in plain English")
     sp.add_argument("--dry-run", action="store_true", help="only show the model's choice")
     sp.add_argument("--yes", action="store_true", help="do not ask before printing")
 
-    sp = printer_cmd("job", cmd_printer_job, "design (OpenSCAD) -> slice -> print")
-    source = sp.add_mutually_exclusive_group(required=True)
-    source.add_argument("--request", help="what to print, in plain English")
-    source.add_argument("--stl", type=Path, help="existing STL to slice and print")
-    source.add_argument("--sliced", type=Path, help="existing .gcode.3mf to print as-is")
-    sp.add_argument("--dry-run", action="store_true", help="do everything except upload and print")
-    sp.add_argument("--yes", action="store_true", help="do not ask before printing")
+    # planning only
+    p = sub.add_parser("plan", help="one fleet planning cycle from files")
+    p.add_argument("--site", type=Path, required=True, help="site file: zones, chargers, rules")
+    p.add_argument("--fleet", type=Path, required=True, help="fleet state: robots, pending tasks, alerts")
+    p.add_argument("--image", type=Path, action="append", default=[], help="camera snapshot (repeatable)")
+    p.add_argument("--offline", action="store_true", help="skip the model, use rules only")
+    p.add_argument("--show-briefing", action="store_true", help="print what the model reads")
+    p.add_argument("--log", type=Path, default=Path("logs/decisions.jsonl"), help="JSONL decision log")
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("model-check", help="send one message to the model")
+    p.add_argument("message", nargs="*")
+    p.set_defaults(func=cmd_model_check)
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    args.func(args)
+    try:
+        args.func(args)
+    except RuntimeError as e:
+        _stop(str(e))
+    except OSError as e:
+        if "Connection refused" in str(e) or "urlopen" in repr(e):
+            _stop(f"Cannot reach the factory at {getattr(args, 'server', '?')}: is 'robofleet factory serve' running?")
+        raise
 
 
 if __name__ == "__main__":

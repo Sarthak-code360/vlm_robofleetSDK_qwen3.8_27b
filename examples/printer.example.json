@@ -5,24 +5,7 @@
     "ip": "192.168.1.50",
     "serial": "SERIAL_FROM_PRINTER_SCREEN",
     "access_code": "ACCESS_CODE",
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
     "file_url_prefix": "file:///sdcard/",
     "use_ams": false
-  },
-  "slicer": {
-    "_comment": "Bambu Studio CLI. Profile JSONs are exported from Bambu Studio (printer, process, filament presets).",
-    "command": [
-      "flatpak",
-      "run",
-      "com.bambulab.BambuStudio"
-    ],
-    "machine_profile": "profiles/machine.json",
-    "process_profile": "profiles/process.json",
-    "filament_profile": "profiles/filament.json"
-  },
-  "openscad": "openscad"
+  }
 }

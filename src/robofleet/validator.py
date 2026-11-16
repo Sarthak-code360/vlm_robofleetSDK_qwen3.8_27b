@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from .schema import INSTRUCTIONS
 
-BLOCKED_STATUSES = {"fault", "charging"}
+BLOCKED_STATUSES = {"fault", "charging", "offline"}  # robots in these states never get tasks
 
 
 def validate_plan(plan: dict, site: dict, fleet: dict) -> tuple[dict, list[str]]:

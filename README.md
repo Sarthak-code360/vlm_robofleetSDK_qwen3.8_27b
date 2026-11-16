@@ -5,13 +5,15 @@
 [![Python](https://img.shields.io/pypi/pyversions/robofleet)](https://pypi.org/project/robofleet/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Python SDK for coordinating a robot fleet (factory, warehouse, hotel) with a vision-language model such as
-**Qwen3.8-27B**, plus Bambu Lab 3D printer control.
+Python SDK for autonomous factories and robot fleets, with a vision-language model such as **Qwen3.8-27B** as the
+central brain. People ask for work in plain English. The model starts the right machine, such as a 3D printer,
+watches the job, and sends the best robot to handle the physical follow-up, such as collecting the finished part.
 
 ```
-site (zones, chargers, rules) + fleet state (robots, tasks, alerts) [+ camera images]
-   -> briefing -> model -> checker -> plan
-              \-> rule-based planner (fallback and baseline)
+"print the actuator housing"
+   -> model picks machine + file -> printer runs -> print done
+   -> model picks the robot (distance, battery, workload) -> robot's own AI collects the part
+   (every model decision is checked in code; rules take over if the model fails)
 ```
 
 - **The model proposes, code verifies.** Every plan goes through a checker that drops made-up IDs, tasks that would
@@ -25,6 +27,7 @@ site (zones, chargers, rules) + fleet state (robots, tasks, alerts) [+ camera im
 - [Requirements](#requirements)
 - [Install](#install)
 - [Quick start](#quick-start)
+- [Autonomous factory](#autonomous-factory)
 - [Connect a model (Qwen3.8-27B)](#connect-a-model-qwen38-27b)
 - [Python API](#python-api)
 - [Describe your site](#describe-your-site)
@@ -37,11 +40,10 @@ site (zones, chargers, rules) + fleet state (robots, tasks, alerts) [+ camera im
 | What | Needed for | Minimum |
 |---|---|---|
 | Python | everything | 3.10+ |
-| A model server | model plans and printer `ask`/`job` | see below; `--offline` mode needs none |
+| A model server | model decisions | see below; `--offline` mode needs none |
 | Qwen3.8-27B on a Mac | local model | Apple Silicon, **24 GB** unified memory (3-bit), 32 GB+ recommended, ~20 GB disk |
 | Qwen3.8-27B on NVIDIA | local or cloud model | **20–24 GB** VRAM (GGUF), **40 GB+** (vLLM FP8) |
 | Bambu Lab printer | printer commands | LAN Only + Developer Mode, microSD card, same network |
-| OpenSCAD + Bambu Studio CLI | `printer job --request` only | optional |
 
 Full model sizes and setup are in [docs/MODEL_SETUP.md](docs/MODEL_SETUP.md).
 
@@ -83,7 +85,40 @@ robofleet plan --site examples/warehouse/site.json --fleet examples/warehouse/fl
   ASSIGN  T-903 -> RBT-002   (Nearest available robot (0 m).)
 ```
 
-Then connect a model (next section) and drop `--offline`.
+Then connect a model (see [Connect a model](#connect-a-model-qwen38-27b)) and drop `--offline`.
+
+## Autonomous factory
+
+Run the 3D-printed actuator demo in simulation, with 10 robots and a simulated printer, in three terminals:
+
+```sh
+robofleet factory serve --config examples/actuator_factory/factory.json --simulate-machines --offline
+robofleet robot sim --count 10
+robofleet factory request "print the actuator housing" --confirm
+```
+
+Open **http://localhost:8080** for the live dashboard. The printer "prints" for 20 s. The nearest suitable robot then
+picks up the part from the Print Bay and brings it to the Output Box:
+
+```
+JOB-0001 started: PRINTER-1 running actuator_housing.gcode.3mf
+JOB-0001 finished on PRINTER-1; created TASK-0002 to collect it
+TASK-0002 -> RBT-004 (rules: Nearest available robot (6 m).)
+RBT-004 picked up TASK-0002: Collect the finished part 'actuator_housing.gcode.3mf' from PRINTER-1 at Print Bay ...
+RBT-004 finished TASK-0002
+```
+
+Next steps:
+
+- **Qwen as the brain:** set `VLM_BASE_URL`, `VLM_MODEL` and `VLM_THINKING=off`, then drop `--offline`.
+- **The real printer:** drop `--simulate-machines`.
+- **A real robot:** run `robofleet robot run --id RBT-001 --exec 'bash real/run_fast.sh {instruction}'`.
+
+Each robot runs its own agent, which sends heartbeats (zone, battery, status) and receives tasks. Machines and
+robots are described in one factory file, so a rocket, welding or assembly factory is a different file with
+different zones, machines and robots.
+
+Full guide, HTTP API and how to add machines: **[docs/FACTORY.md](docs/FACTORY.md)**.
 
 ## Connect a model (Qwen3.8-27B)
 
@@ -157,7 +192,8 @@ decision.error      # why the model was not used, if it failed
 | `rule_based_plan(site, fleet)` | the fallback planner |
 | `build_messages(site, fleet, images)` | the exact messages the model reads |
 | `load_json(path)` | reads a site, fleet or printer file |
-| `robofleet.printers` | `BambuPrinter`, `choose_print_file`, `list_print_files`, `check_printer_ready`, `design_part`, `slice_stl` |
+| `robofleet.factory` | `load_factory`, `Factory`, `serve`, `RobotAgent`, `FactoryClient`, machine drivers ([docs](docs/FACTORY.md)) |
+| `robofleet.printers` | `BambuPrinter`, `choose_print_file`, `list_print_files`, `check_printer_ready` |
 
 Robot instructions the model may send: `go_to_charger`, `pause`, `resume`, `go_to_zone`.
 
@@ -215,15 +251,20 @@ print(choice["file"], printer.status()["gcode_state"])
 ## Command line reference
 
 ```
-robofleet plan --site FILE --fleet FILE [--image IMG ...] [--offline] [--show-briefing] [--log FILE]
+robofleet factory serve --config FILE [--simulate-machines] [--offline] [--host H] [--port P] [--token T]
+robofleet factory request TEXT [--confirm]
+robofleet factory confirm JOB_ID
+robofleet factory status
+robofleet robot run --id ID [--zone Z] [--exec CMD] [--name N]
+robofleet robot sim [--count 10] [--speed 1.0]
+robofleet printer status | list | ask REQUEST [--dry-run] [--yes]
+robofleet plan --site FILE --fleet FILE [--image IMG ...] [--offline] [--show-briefing]
 robofleet model-check [MESSAGE]
-robofleet printer status                    [--config config/printer.json]
-robofleet printer list                      [--prints prints/]
-robofleet printer ask REQUEST [--dry-run] [--yes]
-robofleet printer job (--request TEXT | --stl FILE | --sliced FILE) [--dry-run] [--yes]
 ```
 
-`python -m robofleet ...` works too. Add `--help` to any command for details.
+`factory request/confirm/status` and `robot` commands reach the factory at `ROBOFLEET_SERVER`
+(default `http://127.0.0.1:8080`), using `ROBOFLEET_TOKEN` if set. `python -m robofleet ...` works too. Add `--help`
+to any command for details.
 
 ## Development
 

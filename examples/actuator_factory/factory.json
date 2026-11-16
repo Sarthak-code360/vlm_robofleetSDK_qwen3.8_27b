@@ -1,0 +1,113 @@
+{
+  "_comment": "Describe your factory here: zones (metres), machines and robots. Machine paths are relative to this file.",
+  "name": "Actuator Factory Demo",
+  "type": "3D printed actuator manufacturing factory",
+  "zones": {
+    "Print Bay": {
+      "x": 0,
+      "y": 0
+    },
+    "Assembly Table": {
+      "x": 6,
+      "y": 0
+    },
+    "Output Box": {
+      "x": 12,
+      "y": 0
+    },
+    "Raw Material Store": {
+      "x": 0,
+      "y": 8
+    },
+    "Robot Park": {
+      "x": 6,
+      "y": 8
+    },
+    "Charging Dock": {
+      "x": 12,
+      "y": 8
+    }
+  },
+  "chargers": [
+    "Charging Dock"
+  ],
+  "default_output_zone": "Output Box",
+  "rules": {
+    "battery_reserve_pct": 20,
+    "charge_threshold_pct": 25,
+    "max_queued_tasks_per_robot": 1,
+    "task_battery_cost": 5
+  },
+  "require_confirmation": true,
+  "dispatch": "model",
+  "robot_timeout_s": 15,
+  "machines": [
+    {
+      "id": "PRINTER-1",
+      "type": "3d_printer",
+      "driver": "bambu",
+      "zone": "Print Bay",
+      "config": "../../config/printer.json",
+      "prints_dir": "../../prints",
+      "poll_seconds": 10,
+      "print_seconds": 20,
+      "files": [
+        "actuator_housing.gcode.3mf",
+        "actuator_gear.gcode.3mf",
+        "actuator_cap.gcode.3mf"
+      ]
+    }
+  ],
+  "robots": [
+    {
+      "id": "RBT-001",
+      "name": "SO-101 arm",
+      "home_zone": "Robot Park"
+    },
+    {
+      "id": "RBT-002",
+      "name": "Robot 2",
+      "home_zone": "Robot Park"
+    },
+    {
+      "id": "RBT-003",
+      "name": "Robot 3",
+      "home_zone": "Robot Park"
+    },
+    {
+      "id": "RBT-004",
+      "name": "Robot 4",
+      "home_zone": "Assembly Table"
+    },
+    {
+      "id": "RBT-005",
+      "name": "Robot 5",
+      "home_zone": "Assembly Table"
+    },
+    {
+      "id": "RBT-006",
+      "name": "Robot 6",
+      "home_zone": "Raw Material Store"
+    },
+    {
+      "id": "RBT-007",
+      "name": "Robot 7",
+      "home_zone": "Raw Material Store"
+    },
+    {
+      "id": "RBT-008",
+      "name": "Robot 8",
+      "home_zone": "Charging Dock"
+    },
+    {
+      "id": "RBT-009",
+      "name": "Robot 9",
+      "home_zone": "Output Box"
+    },
+    {
+      "id": "RBT-010",
+      "name": "Robot 10",
+      "home_zone": "Output Box"
+    }
+  ]
+}
