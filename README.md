@@ -112,19 +112,14 @@ The dashboard runs the whole factory without the command line:
 
 - **StarForge AI:** the factory's own AI worker, a chat. Type "print the actuator gear" and a machine starts; when it
   finishes, a robot is assigned and delivers the part. Optionally pick the machine and robot, or attach a process
-  PDF. It answers status questions and alerts you when a machine or robot is missing. It also sits on the Overview
-  as the AI Worker panel.
+  PDF. It answers status questions and alerts you when a machine or robot is missing. It is also on the Overview.
 - **Production:** set up once (process PDF, robots, machines, product, target quantity, parts per unit) and press
   **Run Factory**. Machines are kept busy, robots deliver every part, and progress is tracked until the target.
-- **Overview:** fleet availability, machine utilization, delivery success and fleet energy gauges, a machine state
-  timeline, fleet status, deliveries chart and a live floor map with robot positions and active routes.
-- **Work Orders:** describe the work in plain language, choose the delivery zone and priority, and attach a work
-  instruction PDF for the robot. Jobs wait for **Review & Start** (with a safety check) before a machine starts.
-- **Robot Fleet:** register one robot or a batch of robots: type, model, home zone, payload, capabilities. A robot is
-  either a *digital twin* (simulated inside the server) or an *edge agent* (a real robot running `robofleet robot run`;
-  the dashboard shows the command).
-- **Machines & Layout:** register simulated or Bambu Lab printers (IP, serial, access code) and add zones.
-- **Documents** and **Activity Log**.
+- **Overview:** robots ready, machines working, robot battery, the chat, what is happening right now, and the
+  factory floor map.
+- **Setup:** add robots (one or many, simulated or real) and machines (simulated or Bambu Lab) with a name and a
+  location. Zones and process documents are here too.
+- **Activity:** every update, and the list of machine jobs and robot tasks.
 
 Robots, machines, zones and documents added in the dashboard are saved in `data/` and come back after a restart.
 

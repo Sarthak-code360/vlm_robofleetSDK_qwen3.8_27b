@@ -138,14 +138,11 @@ under `chat`.
 
 | Tab | What you can do |
 |---|---|
-| Overview | Gauges, the **AI Worker** chat panel, machine state timeline, fleet status, task queue, active work order, deliveries chart and live floor map. This is the landing page. |
+| Overview | The landing page: robots ready, machines working, robot battery; the StarForge AI chat; what is happening right now; the factory floor. |
 | Production | **Set up once, then Run Factory**: (1) the workflow/process PDF, (2) the robots and (3) machines that are registered, (4) product name, target quantity, parts per unit and delivery zone. The right side tracks the run: progress, units produced against the target, throughput, time remaining, per-part counts and live activity. Pause, resume or stop at any time. |
-| Overview | Gauges for fleet availability, machine utilization (last 60 min), delivery success and fleet energy; machine state timeline (last 15 min); fleet status; task queue; active work order; deliveries per 5 min; live floor map with robots, machines and routes. Jobs awaiting approval show as a banner. |
-| Work Orders | Create a work order: request text, delivery zone (or automatic), priority (normal or urgent), and an optional work instruction PDF. Approve (**Review & Start**, with a safety check) or cancel jobs. See every robot task and its result. |
-| Robot Fleet | Register a robot or a batch: ID, name, type (mobile manipulator, robotic arm, AMR, humanoid), model, home zone, payload, capabilities and connection. Remove robots added in the dashboard. |
-| Machines & Layout | Register machines: a simulated printer (job files, cycle time) or a Bambu Lab printer over LAN (IP, serial, access code, AMS, print files folder). Add zones with x/y positions. |
-| Documents | Upload and manage PDFs (max 25 MB). |
-| Activity Log | Every request, decision, dispatch and robot event, filterable by category. |
+| StarForge AI | The full chat with the factory's AI worker. |
+| Setup | Robots, Machines, Zones and Documents. Add robots (one or many, simulated or real) and machines (simulated or Bambu Lab) with just a name and a location; technical fields are under "More options". |
+| Activity | Updates (everything that happened, filterable) and Jobs (machine jobs and robot tasks). Jobs that need approval are approved here or on the Overview. |
 
 **Production runs.** A run makes `target` units of a product, each needing a set of parts (job files and how
 many of each). While the run is active, the factory keeps every free machine busy with the part that is most

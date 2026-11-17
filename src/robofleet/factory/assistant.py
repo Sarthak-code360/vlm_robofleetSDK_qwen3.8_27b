@@ -47,7 +47,47 @@ class AssistantMixin:
             job = self.jobs.get(task.get("job_id") or "")
         run = self.runs.get(data.get("run_id") or "")
         if any((x or {}).get("origin") == "chat" for x in (job, task, run)):
-            self._chat_post("assistant", text, "update")
+            friendly = self._friendly(kind, text, job, task)
+            if friendly:
+                self._chat_post("assistant", friendly, "update")
+
+    def _friendly(self, kind: str, text: str, job: dict | None, task: dict | None) -> str | None:
+        """Plain-language progress for people who are not engineers. None = not worth a message."""
+        def part(file):
+            return re.sub(r"[_-]+", " ", re.sub(r"\.gcode\.3mf$", "", file or "part", flags=re.I))
+
+        def machine_name(mid):
+            m = self.machines.get(mid)
+            return (m.spec.get("name") if m else None) or mid
+
+        def robot_name(rid):
+            r = self.robots.get(rid or "")
+            return r["name"] if r else (rid or "A robot")
+
+        thing = part(job["file"]) if job else "the item"
+        if kind == "job" and job:
+            if "started" in text:
+                return f"{machine_name(job['machine_id'])} started making the {thing}."
+            if "finished" in text:
+                return f"The {thing} is ready. Sending a robot to collect it."
+            if "FAILED" in text or "could not start" in text:
+                return f"{machine_name(job['machine_id'])} could not make the {thing}." + (
+                    f" ({job['error']})" if job.get("error") else "")
+            return None
+        if kind == "dispatch" and task:
+            return f"{robot_name(task['robot_id'])} is on the way to collect the {thing}."
+        if kind == "task" and task:
+            if "finished" in text:
+                return f"Done ✓ The {thing} was delivered to {task['to_zone']}."
+            if "FAILED" in text:
+                return f"{robot_name(task['robot_id'])} could not deliver the {thing}." + (
+                    f" ({task['note']})" if task.get("note") else "")
+            if "back in the queue" in text:
+                return f"The robot went offline. Finding another robot for the {thing}."
+            return None  # "picked up": the dispatch message already said it
+        if kind == "run":
+            return text
+        return text
 
     # ------------------------------------------------------------------ entry point
 
@@ -208,7 +248,7 @@ class AssistantMixin:
             return said or "I can start machines, run production and move parts. What should I do?"
 
         if not self.machines:
-            return "No machines are connected yet. Add one in **Machines & Layout → Register Machine**, then ask again."
+            return "There are no machines yet. Add one in **Setup → Machines**, then ask me again."
         file = choice.get("file")
         candidates = [self.machines[machine_id]] if machine_id else (
             [self.machines[choice["machine_id"]]] if choice.get("machine_id") in self.machines else [])
@@ -217,32 +257,32 @@ class AssistantMixin:
         if not with_file:
             where = f"{machine_id} has" if machine_id else "no machine has"
             known = sorted({f for m in self.machines.values() for f in m.list_files()})
-            return f"I can't start that: {where} a job file for it. Available files: " \
-                   f"{', '.join(known) if known else 'none'}. Add the sliced file to the machine's prints folder."
+            nice = ", ".join(re.sub(r"[_-]+", " ", re.sub(r"\.gcode\.3mf$", "", f, flags=re.I)) for f in known)
+            return f"I can't make that yet: {where} a file for it. I can make: {nice or 'nothing yet'}. " \
+                   "Add the part's print file to the machine to make it possible."
         free = [m for m in with_file if m.state() == "idle" and not self._machine_holding(m.id)]
         if not free:
-            busy = ", ".join(f"{m.id} ({'holding a part for pickup' if self._machine_holding(m.id) else m.state()})"
-                             for m in with_file)
-            return f"Every machine that can make {file} is busy right now: {busy}. Ask again when one is free, " \
-                   "or start a production run and I'll queue it."
+            return "All machines that can make that are busy right now. Ask me again in a moment, " \
+                   "or say 'make 5 …' and I'll queue them up as a production run."
         machine = free[0]
         to_zone = choice.get("to_zone") if choice.get("to_zone") in self.site["zones"] else self.default_output_zone
         job = self._new_job(text, machine.id, file, to_zone, said[:200], document, "normal", self.require_confirmation)
         job.update(origin="chat", preferred_robot=robot_id)
         self._event("request", f"{self.assistant_name}: {job['id']} on {machine.id} → {file}, deliver to {to_zone}",
                     job_id=job["id"])
+        thing = re.sub(r"[_-]+", " ", re.sub(r"\.gcode\.3mf$", "", file, flags=re.I))
+        mname = machine.spec.get("name") or machine.id
         if self.require_confirmation:
-            outcome = f"{job['id']} is ready on {machine.id} ({file}). Approve it in Work Orders to start."
+            outcome = f"The {thing} is ready to start on {mname}. Press Start on the Overview to begin."
         else:
             self.confirm_job(job["id"])
-            outcome = (f"Starting {job['id']} on {machine.id}: {file}. When it finishes, "
-                       + (f"{robot_id} will take it to {to_zone}." if robot_id
-                          else f"I'll send the best robot to take it to {to_zone}."))
+            who = self.robots[robot_id]["name"] if robot_id else "a robot"
+            outcome = f"Starting the {thing} on {mname}. When it's done, {who} will bring it to {to_zone}."
         return self._join(said, outcome + self._robot_warning())
 
     def _chat_start_run(self, text: str, choice: dict, document, said: str) -> str:
         if not self.machines:
-            return "No machines are connected yet. Add one in **Machines & Layout**, then ask again."
+            return "There are no machines yet. Add one in **Setup → Machines**, then ask me again."
         name = (choice.get("product") or "").strip()[:60] or "Production"
         name = re.sub(r"[^\w .,()/+#-]", " ", name).strip() or "Production"
         quantity = int(choice.get("quantity") or 0)
@@ -272,9 +312,9 @@ class AssistantMixin:
     def _robot_warning(self) -> str:
         online = [r for r in self.robots.values() if r["status"] not in {"offline", "fault"}]
         if not self.robots:
-            return " ⚠ No robots are registered, so nobody can collect the part. Add robots in Robot Fleet."
+            return " ⚠ There are no robots yet, so nobody can collect the part. Add one in Setup → Robots."
         if not online:
-            return " ⚠ No robots are online right now. Connect or add a robot so the part can be collected."
+            return " ⚠ No robots are online right now. Add or connect a robot in Setup so the part can be collected."
         return ""
 
     def _status_summary(self) -> str:

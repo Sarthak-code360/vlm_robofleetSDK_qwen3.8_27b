@@ -414,6 +414,8 @@ class Factory(AssistantMixin):
                     self._event("dispatch", f"{task['id']} -> {robot['id']} ({decision.source}: {a.get('reason', '')})",
                                 task_id=task["id"], robot_id=robot["id"])
                 for m in decision.plan["robot_messages"]:
+                    if (self.robots.get(m["robot_id"]) or {}).get("status") == "offline":
+                        continue  # it cannot hear us; it gets fresh instructions when it reconnects
                     key, last = (m["instruction"], m.get("target_zone")), self._last_message.get(m["robot_id"])
                     if last and last[0] == key and time.time() - last[1] < 60:
                         continue  # same instruction sent less than a minute ago
@@ -453,15 +455,15 @@ class Factory(AssistantMixin):
                 return
             available = [r for r in self.robots.values() if r["status"] not in {"offline", "fault", "charging"}]
             if not available:
-                self._alert("no-robots", f"No robot is available to collect {len(pending)} waiting part(s) "
-                            f"({', '.join(t['id'] for t in pending[:3])}). Add a robot in Robot Fleet or connect one.",
+                self._alert("no-robots", f"No robot is free to collect {len(pending)} finished part(s). "
+                            "Add a robot in Setup → Robots, or connect one.",
                             repeat_s=120)
                 return
             now = time.time()
             for t in pending:
                 if now - t["created"] > self.robot_wait_alert_s:
-                    self._alert(f"slow:{t['id']}", f"{t['id']} has waited {int(now - t['created'])} s for a robot. "
-                                "All suitable robots are busy or low on battery. Consider adding a robot.", repeat_s=600)
+                    self._alert(f"slow:{t['id']}", f"A finished part has waited {int(now - t['created'])} s for a robot. "
+                                "All robots are busy or low on battery. Consider adding a robot.", repeat_s=600)
 
     def _alert(self, key: str, text: str, repeat_s: float = 120) -> None:
         now = time.time()

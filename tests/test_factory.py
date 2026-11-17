@@ -430,7 +430,7 @@ class ChatTest(unittest.TestCase):
         out = factory.chat_message("please print the actuator gear")
         reply = out["messages"][-1]
         self.assertEqual(reply["role"], "assistant")
-        self.assertIn("Starting JOB-", reply["text"])
+        self.assertIn("Starting the actuator gear", reply["text"])
         job = next(iter(factory.jobs.values()))
         self.assertEqual((job["file"], job["origin"]), ("actuator_gear.gcode.3mf", "chat"))
         self.assertTrue(wait_for(lambda: job["status"] == "running"))
@@ -438,8 +438,8 @@ class ChatTest(unittest.TestCase):
         task = factory.tasks[job["task_id"]]
         self.assertEqual(task["robot_id"], "RBT-001")
         texts = [m["text"] for m in factory.chat]
-        self.assertTrue(any("created" in t and task["id"] in t for t in texts), texts)   # progress posted to chat
-        self.assertTrue(any(f"{task['id']} -> RBT-001" in t for t in texts), texts)
+        self.assertIn("The actuator gear is ready. Sending a robot to collect it.", texts)  # progress in plain words
+        self.assertIn("RBT-001 is on the way to collect the actuator gear.", texts)
 
     def test_chosen_robot_and_machine_are_used(self):
         factory = make_factory(None, require_confirmation=False)
@@ -466,7 +466,7 @@ class ChatTest(unittest.TestCase):
 
     def test_no_machines_and_questions(self):
         empty = make_factory(None, machines=[])
-        self.assertIn("No machines", empty.chat_message("print a gear")["messages"][-1]["text"])
+        self.assertIn("no machines", empty.chat_message("print a gear")["messages"][-1]["text"])
         factory = make_factory(None)
         self.assertIn("robots online", factory.chat_message("what is the status?")["messages"][-1]["text"])
 

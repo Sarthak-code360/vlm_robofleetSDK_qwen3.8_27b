@@ -20,8 +20,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- Tab order: Overview, Production, StarForge AI, Work Orders, Robot Fleet, Machines & Layout, Documents, Activity Log.
-  The dashboard opens on the Overview.
+- Simpler dashboard for non-technical users. Tabs: Overview, Production, StarForge AI, Setup (robots, machines,
+  zones, documents) and Activity (updates, jobs). The Overview shows only robots ready, machines working, battery,
+  the chat, what is happening now, and the factory floor. Labels and messages are in plain words.
+- Removed from the Overview: delivery success gauge, machine state timeline, fleet donut, task queue and deliveries
+  chart. The Work Orders tab is replaced by the chat.
+- Add robot and Add machine ask only for a name, location and type; technical fields are under "More options".
+- Chat progress updates are in plain language ("Printer 2 started making the actuator gear.").
+- Robots that are offline no longer get charging instructions.
 - The example factory is fully autonomous (`require_confirmation: false`).
 - A machine that still holds a finished part (waiting for a robot) is not given a new job.
 
