@@ -228,6 +228,60 @@ pre.cmd{margin:8px 0 0;padding:10px 12px;background:#0f1115;border:1px solid var
 .empty-run svg{width:64px;height:64px;stroke:#3a3f4b;margin-bottom:10px}
 .link{background:none;border:0;color:var(--accent-2);cursor:pointer;padding:0;font:inherit}.link:hover{text-decoration:underline}
 
+/* StarForge AI chat */
+.sf-tab{color:#b3abff;margin-right:6px;font-size:13px}
+.sf-mark{display:inline-block;width:28px;height:28px;border-radius:8px;flex:none;
+  background:radial-gradient(circle at 30% 25%,#ffb36b 0%,#ff7a59 22%,#8b80f9 60%,#5b4fe0 100%);position:relative;box-shadow:0 0 0 1px rgba(255,255,255,.06) inset}
+.sf-mark::after{content:"✦";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-size:15px;text-shadow:0 0 6px rgba(255,255,255,.6)}
+.sf-mark.sm{width:22px;height:22px;border-radius:6px}.sf-mark.sm::after{font-size:12px}
+.sf-mark.xl{width:64px;height:64px;border-radius:18px}.sf-mark.xl::after{font-size:34px}
+.ai-worker{border-color:#3a3463;background:linear-gradient(180deg,#1a1830,#16181d 60%)}
+.mini-msgs{max-height:230px;overflow-y:auto;display:grid;gap:8px;padding:2px 2px 10px;align-content:start}
+.mini-msgs .msg-empty{color:var(--muted);padding:8px 0}
+#view-chat.active{display:block}
+.chat-shell{display:flex;flex-direction:column;height:calc(100vh - 150px);min-height:420px}
+.chat-scroll{flex:1;overflow-y:auto;padding:8px 0 16px}
+.chat-col{max-width:860px;margin:0 auto;width:100%;display:grid;gap:16px;align-content:start}
+.chat-bottom{gap:8px}
+.chat-foot{text-align:center;color:var(--faint);font-size:11.5px}
+.msg{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.msg.user{justify-content:flex-end}
+.msg.user .bubble{background:#2a2d3a;border:1px solid #353948;border-radius:16px 16px 4px 16px;padding:10px 14px;max-width:78%;color:var(--strong);white-space:pre-wrap;word-break:break-word}
+.msg .body{min-width:0;flex:1}
+.msg .who{font-size:12px;color:var(--muted);margin-bottom:3px}.msg .who b{color:var(--text);font-weight:600}
+.msg .text{color:var(--text);line-height:1.6;word-break:break-word}
+.msg.update .text{color:var(--muted);font-size:12.5px}
+.msg.update .sf-mark{opacity:.55}
+.msg.alert .text{border:1px solid rgba(255,152,48,.4);background:rgba(255,152,48,.08);border-radius:8px;padding:8px 12px;color:#ffd0a0}
+.msg .tags{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.typing{display:inline-flex;gap:4px;padding:8px 0}
+.typing i{width:7px;height:7px;border-radius:50%;background:#8b80f9;animation:blink 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.welcome{text-align:center;padding:9vh 12px 20px}
+.welcome h1{font-size:30px;margin:16px 0 6px;color:var(--strong);letter-spacing:-.02em}
+.welcome p{color:var(--muted);margin:0 auto;max-width:520px;font-size:14.5px}
+.suggest{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-width:640px;margin:26px auto 0}
+.suggest button{text-align:left;background:#16181f;border:1px solid #2c303b;border-radius:12px;padding:12px 14px;color:var(--text);cursor:pointer}
+.suggest button:hover{border-color:#5b4fe0;background:#1b1a2c}
+.suggest button span{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+@media (max-width:640px){.suggest{grid-template-columns:minmax(0,1fr)}}
+.composer-box{border:1px solid #343849;background:#15171e;border-radius:18px;padding:10px 12px 8px;transition:border-color .15s}
+.composer-box:focus-within{border-color:#6a5ff0;box-shadow:0 0 0 3px rgba(115,103,240,.15)}
+.composer textarea{width:100%;border:0;background:none;resize:none;min-height:26px;max-height:180px;padding:4px 4px;font-size:14.5px;box-shadow:none !important;outline:none}
+.composer-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+.composer-row select{width:auto;max-width:170px;padding:5px 8px;border-radius:99px;font-size:12px;background:#1d2029;border-color:#30343f}
+.icon-btn{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;cursor:pointer;color:var(--muted);border:1px solid transparent}
+.icon-btn:hover{background:#22252f;color:var(--text)}
+.icon-btn svg{width:18px;height:18px}
+.send{margin-left:auto;width:36px;height:36px;border-radius:50%;border:0;background:var(--accent);color:#fff;display:grid;place-items:center;cursor:pointer;flex:none}
+.send:hover{background:var(--accent-2)}.send:disabled{opacity:.4;cursor:not-allowed}
+.send svg{width:18px;height:18px}
+.att{display:inline-flex;align-items:center;gap:8px;background:#1f2230;border:1px solid #343849;border-radius:10px;padding:5px 8px 5px 10px;margin:0 0 6px;font-size:12.5px}
+.att b{font-weight:500}.att button{background:none;border:0;color:var(--muted);cursor:pointer;font-size:16px;line-height:1}
+.composer.mini .composer-box{border-radius:14px}
+@media (max-width:640px){.composer-row select{max-width:110px}}
+
 /* dialog */
 dialog{border:1px solid var(--line-2);border-radius:8px;background:var(--panel);color:var(--text);padding:0;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 40px)}
 dialog::backdrop{background:rgba(0,0,0,.6)}
@@ -262,8 +316,9 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
     </div>
   </div>
   <nav class="tabs" id="tabs">
-    <button class="tab active" data-tab="production">Production</button>
-    <button class="tab" data-tab="overview">Overview</button>
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="production">Production</button>
+    <button class="tab" data-tab="chat"><span class="sf-tab">&#10022;</span><span class="assistant-name">StarForge AI</span></button>
     <button class="tab" data-tab="orders">Work Orders<span class="count" id="count-approvals" hidden></span></button>
     <button class="tab" data-tab="fleet">Robot Fleet</button>
     <button class="tab" data-tab="machines">Machines &amp; Layout</button>
@@ -274,7 +329,7 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 
 <main>
   <!-- ================= OVERVIEW ================= -->
-  <section class="view active" id="view-production">
+  <section class="view" id="view-production">
     <div class="grid g-prod">
       <div class="card-xl">
         <h2>Set Up Production</h2>
@@ -295,13 +350,21 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
     </div>
   </section>
 
-  <section class="view" id="view-overview">
+  <section class="view active" id="view-overview">
     <div id="approval-banner"></div>
     <div class="grid g4">
       <div class="panel"><div class="panel-head"><span class="panel-title">Fleet Availability</span></div><div id="g-avail"></div><div class="gauge-foot" id="g-avail-foot"></div></div>
       <div class="panel"><div class="panel-head"><span class="panel-title">Machine Utilization</span><span class="panel-hint">last 60 min</span></div><div id="g-util"></div><div class="gauge-foot" id="g-util-foot"></div></div>
       <div class="panel"><div class="panel-head"><span class="panel-title">Delivery Success Rate</span></div><div id="g-success"></div><div class="gauge-foot" id="g-success-foot"></div></div>
       <div class="panel"><div class="panel-head"><span class="panel-title">Fleet Energy Level</span></div><div id="g-energy"></div><div class="gauge-foot" id="g-energy-foot"></div></div>
+    </div>
+
+    <div class="panel mt ai-worker">
+      <div class="panel-head"><span class="sf-mark sm"></span><span class="panel-title">AI Worker · <span class="assistant-name">StarForge AI</span></span>
+        <span class="panel-hint">tell the factory what to do: it starts machines and assigns robots on its own</span>
+        <div class="actions"><button class="btn sm" data-tab="chat">Open full chat</button></div></div>
+      <div class="mini-msgs" id="chat-mini-list"></div>
+      <form class="composer mini" data-chat="mini" autocomplete="off"></form>
     </div>
 
     <div class="panel mt">
@@ -323,6 +386,17 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
         <div class="panel-head"><span class="panel-title">Floor Map</span><span class="panel-hint">live robot positions &amp; routes</span>
           <div class="actions legend" id="map-legend"></div></div>
         <div id="floormap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= STARFORGE AI CHAT ================= -->
+  <section class="view" id="view-chat">
+    <div class="chat-shell">
+      <div class="chat-scroll" id="chat-main-scroll"><div class="chat-col" id="chat-main-list"></div></div>
+      <div class="chat-col chat-bottom">
+        <form class="composer" data-chat="main" autocomplete="off"></form>
+        <div class="chat-foot"><span class="assistant-name">StarForge AI</span> starts machines, plans production and dispatches robots. Every action is validated before execution.</div>
       </div>
     </div>
   </section>
@@ -439,7 +513,7 @@ const badge = (group, s) => { const [t, c] = LABELS[group][s] || [s, "grey"]; re
 const colorOf = (group, s) => COLORS[(LABELS[group][s] || [0, "grey"])[1]];
 
 /* ------------------------------------------------------------------ state */
-let S = null, tab = (location.hash.match(/tab=(\w+)/) || [])[1] || store.get("rf.tab") || "production", evFilter = "all", busy = false;
+let S = null, tab = (location.hash.match(/tab=(\w+)/) || [])[1] || store.get("rf.tab") || "overview", evFilter = "all", busy = false;
 const ONLINE = new Set(["idle", "busy", "charging"]);
 
 async function refresh() {
@@ -458,10 +532,12 @@ async function refresh() {
 function render() {
   const f = S.factory;
   $("#site-sub").textContent = `${f.name || "Facility"} · ${f.type || ""}`;
-  $("#chip-model").innerHTML = `Orchestrator <b>${esc(f.model || "Rule engine")}</b> · Dispatch <b>${f.dispatch === "model" ? "AI" : "Rules"}</b>`;
+  $("#chip-model").innerHTML = `AI Worker <b>${esc(f.assistant || "StarForge AI")}</b>${f.model ? "" : " · limited mode"}`;
+  document.querySelectorAll(".assistant-name").forEach(el => { if (el.textContent !== f.assistant) el.textContent = f.assistant; });
+  renderChatMini(); syncComposers();
   const pending = S.jobs.filter(j => j.status === "awaiting_confirmation");
   const c = $("#count-approvals"); c.hidden = !pending.length; c.textContent = pending.length;
-  ({production: renderProduction, overview: renderOverview, orders: renderOrders, fleet: renderFleet, machines: renderMachines,
+  ({production: renderProduction, overview: renderOverview, chat: renderChatTab, orders: renderOrders, fleet: renderFleet, machines: renderMachines,
     documents: renderDocuments, activity: renderActivity})[tab]();
 }
 function setTab(t) {
@@ -469,6 +545,7 @@ function setTab(t) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === t));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + t));
   if (t === "orders") buildOrderForm();
+  if (t === "chat") { chatState.lastMain = ""; setTimeout(() => { const ta = document.querySelector('form.composer[data-chat=main] textarea'); ta && ta.focus(); }, 50); }
   if (S) render();
 }
 
@@ -524,6 +601,104 @@ function bars(values, labels) {
     if (i % 3 === 0) out += `<text x="${x + (bw - 6) / 2}" y="${H - 6}" text-anchor="middle" font-size="10.5" fill="#8b919c">${labels[i]}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">${grid}${out}</svg>`;
+}
+
+/* ------------------------------------------------------------------ StarForge AI chat */
+const chatState = {pending: null, doc: null, sending: false, lastMain: "", lastMini: ""};
+const SEND = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+const CLIP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>`;
+const SUGGESTIONS = [["Print the actuator housing", "Starts a free printer, a robot delivers it"], ["Make 10 actuators", "Plans and runs a full production"],
+                     ["What's the factory status?", "Machines, robots and production"], ["Which robots are available?", "Battery, location and status"]];
+const richText = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+
+function composerHTML(kind) {
+  const ph = kind === "mini" ? "Tell the factory what to do… e.g. print the actuator gear" : "Message StarForge AI… e.g. print the actuator housing";
+  return `<div class="composer-box"><div class="att" hidden></div>
+    <textarea rows="1" name="text" placeholder="${esc(ph)}"></textarea>
+    <div class="composer-row">
+      <label class="icon-btn" title="Attach a process PDF">${CLIP}<input type="file" accept="application/pdf,.pdf" hidden></label>
+      <select data-pick="machine" title="Machine"></select><select data-pick="robot" title="Robot"></select>
+      <button class="send" type="submit" aria-label="Send">${SEND}</button></div></div>`;
+}
+function initComposers() {
+  document.querySelectorAll("form.composer").forEach(form => {
+    form.innerHTML = composerHTML(form.dataset.chat);
+    const ta = form.querySelector("textarea");
+    ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(180, ta.scrollHeight) + "px"; });
+    ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } });
+    form.querySelector("input[type=file]").addEventListener("change", async e => {
+      const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+      try { const d = await uploadDoc(file); chatState.doc = {id: d.id, name: d.name}; syncComposers(true); } catch (err) { toast(err.message, "bad"); }
+    });
+    form.addEventListener("submit", e => { e.preventDefault(); sendChat(form); });
+  });
+}
+function syncComposers(force) {
+  if (!S) return;
+  const msig = JSON.stringify([S.machines.map(m => [m.id, m.name, m.state]), S.robots.map(r => [r.id, r.status])]);
+  document.querySelectorAll("form.composer").forEach(form => {
+    if (force || form._sig !== msig) {
+      form._sig = msig;
+      const ms = form.querySelector('[data-pick=machine]'), rs = form.querySelector('[data-pick=robot]');
+      const mv = ms.value, rv = rs.value;
+      ms.innerHTML = `<option value="">Machine: Auto</option>` + S.machines.map(m => `<option value="${esc(m.id)}">${esc(m.id)} · ${esc((LABELS.machine[m.state] || [m.state])[0])}</option>`).join("");
+      rs.innerHTML = `<option value="">Robot: Auto</option>` + S.robots.map(r => `<option value="${esc(r.id)}">${esc(r.id)} · ${esc((LABELS.robot[r.status] || [r.status])[0])}</option>`).join("");
+      ms.value = [...ms.options].some(o => o.value === mv) ? mv : ""; rs.value = [...rs.options].some(o => o.value === rv) ? rv : "";
+    }
+    const att = form.querySelector(".att");
+    att.hidden = !chatState.doc;
+    att.innerHTML = chatState.doc ? `<span class="tag">PDF</span><b>${esc(chatState.doc.name)}</b><button type="button" data-action="chat-clear-doc" aria-label="Remove">×</button>` : "";
+    form.querySelector(".send").disabled = chatState.sending;
+  });
+}
+async function sendChat(form) {
+  const ta = form.querySelector("textarea"), text = ta.value.trim();
+  if (!text || chatState.sending) return;
+  const body = {text, machine_id: form.querySelector('[data-pick=machine]').value || null,
+                robot_id: form.querySelector('[data-pick=robot]').value || null, document_id: chatState.doc ? chatState.doc.id : null};
+  chatState.sending = true; chatState.pending = {text, doc: chatState.doc, machine: body.machine_id, robot: body.robot_id};
+  ta.value = ""; ta.style.height = "auto"; chatState.doc = null;
+  form.querySelector('[data-pick=machine]').value = ""; form.querySelector('[data-pick=robot]').value = "";
+  syncComposers(true); renderChatMini(); if (tab === "chat") renderChatTab();
+  try { await api("/api/chat", {body}); }
+  catch (e) { toast(e.message, "bad"); ta.value = text; }
+  finally { chatState.sending = false; chatState.pending = null; await refresh(); syncComposers(true); renderChatMini(); if (tab === "chat") renderChatTab(); }
+}
+function msgHTML(m) {
+  const name = esc(S.factory.assistant);
+  if (m.role === "user") {
+    const tags = [m.machine_id && `Machine ${m.machine_id}`, m.robot_id && `Robot ${m.robot_id}`, m.document && `PDF ${m.document.name}`].filter(Boolean);
+    return `<div class="msg user"><div class="bubble">${esc(m.text)}${tags.length ? `<div class="tags">${tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}</div></div>`;
+  }
+  const head = m.kind === "reply" ? `<div class="who"><b>${name}</b> · ${fmtTime(m.ts)}${m.latency_s ? ` · ${m.latency_s}s` : ""}</div>`
+    : `<div class="who">${m.kind === "alert" ? "<b style='color:var(--orange)'>Alert</b>" : "Update"} · ${fmtTime(m.ts)}</div>`;
+  return `<div class="msg ${esc(m.kind)}"><span class="sf-mark sm"></span><div class="body">${head}<div class="text">${richText(m.text)}</div></div></div>`;
+}
+function pendingHTML() {
+  const p = chatState.pending; if (!p) return "";
+  return msgHTML({role: "user", text: p.text, machine_id: p.machine, robot_id: p.robot, document: p.doc}) +
+    `<div class="msg reply"><span class="sf-mark sm"></span><div class="body"><div class="who"><b>${esc(S.factory.assistant)}</b> · thinking</div><div class="typing"><i></i><i></i><i></i></div></div></div>`;
+}
+function renderChatTab() {
+  const key = JSON.stringify([S.chat.length && S.chat[S.chat.length - 1].id, !!chatState.pending, S.factory.assistant]);
+  if (key === chatState.lastMain) return; chatState.lastMain = key;
+  const scroller = $("#chat-main-scroll"), atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+  $("#chat-main-list").innerHTML = (!S.chat.length && !chatState.pending)
+    ? `<div class="welcome"><span class="sf-mark xl"></span><h1>${esc(S.factory.assistant)}</h1>
+        <p>Your autonomous factory worker. Tell me what to make. I start the machines, assign the robots and keep you posted.</p>
+        <div class="suggest">${SUGGESTIONS.map(([t, d]) => `<button type="button" data-action="suggest" data-text="${esc(t)}">${esc(t)}<span>${esc(d)}</span></button>`).join("")}</div></div>`
+    : S.chat.map(msgHTML).join("") + pendingHTML();
+  if (atBottom || chatState.pending) scroller.scrollTop = scroller.scrollHeight;
+}
+function renderChatMini() {
+  if (!S) return;
+  const key = JSON.stringify([S.chat.length && S.chat[S.chat.length - 1].id, !!chatState.pending]);
+  if (key === chatState.lastMini) return; chatState.lastMini = key;
+  const el = $("#chat-mini-list");
+  el.innerHTML = (!S.chat.length && !chatState.pending)
+    ? `<div class="msg-empty">Ask ${esc(S.factory.assistant)} to print a part, start production, or report status. Machines start and robots are assigned automatically.</div>`
+    : S.chat.slice(-8).map(msgHTML).join("") + pendingHTML();
+  el.scrollTop = el.scrollHeight;
 }
 
 /* ------------------------------------------------------------------ production */
@@ -844,7 +1019,7 @@ async function submitOrder(form, resultEl, onDone) {
       docId = (await uploadDoc(file)).id;
     }
     const r = await api("/api/requests", {body: {text, document_id: docId || null, deliver_to: form.deliver_to.value || null, priority: form.priority.value}});
-    const lat = r.model && r.model.latency_s != null ? ` · ${r.model.model || "model"} ${r.model.latency_s}s` : "";
+    const lat = r.model && r.model.latency_s != null ? ` · ${S.factory.assistant} ${r.model.latency_s}s` : "";
     resultEl.innerHTML = `<div class="result ${r.ok ? "ok" : "bad"}"><b>${r.ok ? "Work order accepted" : "Not accepted"}</b><span class="faint">${esc(lat)}</span><br>${esc(r.summary)}
       ${r.choice && r.choice.reason ? `<br><span class="muted">Reasoning: ${esc(r.choice.reason)}</span>` : ""}
       ${r.job && r.job.status === "awaiting_confirmation" ? `<div class="mt"><button class="btn sm go" data-action="approve-job" data-id="${esc(r.job.id)}">Review &amp; Start ${esc(r.job.id)}</button></div>` : ""}</div>`;
@@ -1094,6 +1269,8 @@ document.addEventListener("click", e => {
     case "add-zone": return dlgAddZone();
     case "remove-doc": return dlgConfirm(`Delete ${id}`, `Delete document <b>${esc(id)}</b>? Work orders that reference it will no longer be able to open it.`, "Delete", () => api(`/api/documents/${encodeURIComponent(id)}`, {method: "DELETE"}));
     case "ev-filter": evFilter = id; return renderActivity();
+    case "chat-clear-doc": chatState.doc = null; return syncComposers(true);
+    case "suggest": { const f = document.querySelector('form.composer[data-chat=main]'); f.querySelector("textarea").value = a.dataset.text; return sendChat(f); }
     case "setup-clear-doc": setup.docId = null; saveSetup(); return renderProduction();
     case "run-pause": return runAction(id, "pause");
     case "run-resume": return runAction(id, "resume");
@@ -1108,8 +1285,9 @@ drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add(
 drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", async e => { e.preventDefault(); drop.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) { try { await uploadDoc(f); refresh(); } catch (err) { toast(err.message, "bad"); } } });
 
+initComposers();
 setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString(); }, 1000);
-setTab(tab in {production:1, overview:1, orders:1, fleet:1, machines:1, documents:1, activity:1} ? tab : "production");
+setTab(tab in {production:1, overview:1, chat:1, orders:1, fleet:1, machines:1, documents:1, activity:1} ? tab : "overview");
 refresh().then(() => { if (tab === "orders") buildOrderForm(); });
 setInterval(refresh, 2000);
 </script>

@@ -2,6 +2,7 @@
   "_comment": "Describe your factory here: zones (metres), machines and robots. Machine paths are relative to this file.",
   "name": "Actuator Manufacturing Cell",
   "type": "3D-printed actuator manufacturing facility",
+  "assistant_name": "StarForge AI",
   "zones": {
     "Print Bay": {
       "x": 0,
@@ -38,7 +39,7 @@
     "max_queued_tasks_per_robot": 1,
     "task_battery_cost": 5
   },
-  "require_confirmation": true,
+  "require_confirmation": false,
   "dispatch": "model",
   "robot_timeout_s": 15,
   "machines": [

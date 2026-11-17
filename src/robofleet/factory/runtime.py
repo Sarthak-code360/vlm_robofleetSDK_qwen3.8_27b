@@ -25,6 +25,7 @@ from pathlib import Path
 
 from ..coordinator import Coordinator
 from ..model import ModelClient, ModelError
+from .assistant import DEFAULT_ASSISTANT, AssistantMixin
 from .machines import DRIVERS, Machine, MachineError, build_machine
 
 ROBOT_STATUSES = {"idle", "busy", "charging", "fault"}
@@ -43,7 +44,7 @@ MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 HISTORY_S = 3600
 
 
-class Factory:
+class Factory(AssistantMixin):
     """Holds the live state of one factory and runs its decisions.
 
     Args:
@@ -74,6 +75,11 @@ class Factory:
         self.require_confirmation = bool(config.get("require_confirmation", True))
         self.default_output_zone = config.get("default_output_zone")
         self.dispatch_with_model = config.get("dispatch", "model") == "model"
+        self.assistant_name = str(config.get("assistant_name") or DEFAULT_ASSISTANT)
+        self.chat: list[dict] = []
+        self._chat_seq = 0
+        self._alerted: dict[str, float] = {}
+        self.robot_wait_alert_s = float(config.get("robot_wait_alert_s", 90))
 
         self.robots: dict[str, dict] = {}
         for r in config.get("robots", []):
@@ -107,6 +113,8 @@ class Factory:
         event = {"ts": round(time.time(), 3), "kind": kind, "text": text, **data}
         self.events.append(event)
         del self.events[:-200]
+        if kind in {"job", "task", "dispatch", "run", "alert"}:
+            self._chat_follow(kind, text, data)
         if self.log_path:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             with self.log_path.open("a") as f:
@@ -255,6 +263,9 @@ class Factory:
                 return {"ok": False, "summary": f"rejected: {machine['id']} is {machine['state']}", "choice": choice}
             if any(j["machine_id"] == machine["id"] and j["status"] in ACTIVE_JOB for j in self.jobs.values()):
                 return {"ok": False, "summary": f"rejected: {machine['id']} already has a job", "choice": choice}
+            if any(j["machine_id"] == machine["id"] and j["status"] == "done" for j in self.jobs.values()):
+                return {"ok": False, "summary": f"rejected: {machine['id']} still holds the last part, waiting for a robot",
+                        "choice": choice}
             job = self._new_job(text, machine["id"], choice["file"], to_zone, reason, document, priority,
                                 self.require_confirmation)
             return {"ok": True, "summary": f"{job['id']}: {machine['id']} will run {job['file']}, then deliver to {to_zone}",
@@ -343,6 +354,7 @@ class Factory:
                                           f"Collect the finished part '{job['file']}' from {machine.id} at {machine.zone} "
                                           f"and place it in {job['deliver_to']}.", job_id=job["id"],
                                           document=job.get("document"), priority=job.get("priority", "normal"))
+                    task.update(origin=job.get("origin"), preferred_robot=job.get("preferred_robot"))
                     job.update(status="done", finished=time.time(), task_id=task["id"])
                     self._event("job", f"{job['id']} finished on {machine.id}; created {task['id']} to collect it",
                                 job_id=job["id"], task_id=task["id"])
@@ -378,7 +390,12 @@ class Factory:
         if not self._dispatching.acquire(blocking=False):
             return
         try:
+            self._dispatch_preferred()
+            self._alert_waiting_tasks()
             fleet = self.fleet_snapshot()
+            with self.lock:
+                chosen = {t["id"] for t in self.tasks.values() if t.get("preferred_robot")}
+            fleet["pending_tasks"] = [t for t in fleet["pending_tasks"] if t["id"] not in chosen]
             if not fleet["pending_tasks"] or not any(r["status"] not in {"offline", "fault", "charging"} for r in fleet["robots"]):
                 return
             model = self.model if self.dispatch_with_model else None
@@ -408,6 +425,49 @@ class Factory:
                     self._event("checker", f"Rejected from model plan: {r}")
         finally:
             self._dispatching.release()
+
+    def _dispatch_preferred(self) -> None:
+        """Tasks where the person chose the robot go to that robot as soon as it can take them."""
+        with self.lock:
+            reserve = self.rules.get("battery_reserve_pct", 20)
+            for task in self.tasks.values():
+                rid = task.get("preferred_robot")
+                if task["status"] != "pending" or not rid:
+                    continue
+                robot = self.robots.get(rid)
+                if robot is None:
+                    task["preferred_robot"] = None  # removed meanwhile: let the dispatcher choose
+                    continue
+                if robot["status"] != "idle" or self._active_tasks(rid) or robot["battery"] - task["battery_cost"] < reserve:
+                    self._alert(f"wait:{task['id']}:{rid}", f"{task['id']} is waiting for {rid}, which is "
+                                f"{robot['status']} ({robot['battery']}% battery).", repeat_s=300)
+                    continue
+                task.update(status="assigned", robot_id=rid, assigned=time.time(), reason="chosen by the operator")
+                self._event("dispatch", f"{task['id']} -> {rid} (chosen by the operator)", task_id=task["id"], robot_id=rid)
+
+    def _alert_waiting_tasks(self) -> None:
+        """Warns when finished parts cannot be collected: no robots, or a task waiting too long."""
+        with self.lock:
+            pending = [t for t in self.tasks.values() if t["status"] == "pending"]
+            if not pending:
+                return
+            available = [r for r in self.robots.values() if r["status"] not in {"offline", "fault", "charging"}]
+            if not available:
+                self._alert("no-robots", f"No robot is available to collect {len(pending)} waiting part(s) "
+                            f"({', '.join(t['id'] for t in pending[:3])}). Add a robot in Robot Fleet or connect one.",
+                            repeat_s=120)
+                return
+            now = time.time()
+            for t in pending:
+                if now - t["created"] > self.robot_wait_alert_s:
+                    self._alert(f"slow:{t['id']}", f"{t['id']} has waited {int(now - t['created'])} s for a robot. "
+                                "All suitable robots are busy or low on battery. Consider adding a robot.", repeat_s=600)
+
+    def _alert(self, key: str, text: str, repeat_s: float = 120) -> None:
+        now = time.time()
+        if now - self._alerted.get(key, 0) >= repeat_s:
+            self._alerted[key] = now
+            self._event("alert", text)
 
     def run_forever(self, interval_s: float = 2.0, stop: threading.Event | None = None) -> None:
         stop = stop or threading.Event()
@@ -947,7 +1007,7 @@ class Factory:
                 "factory": {k: self.config.get(k) for k in ("name", "type", "default_output_zone")}
                 | {"require_confirmation": self.require_confirmation, "model": getattr(self.model, "model", None),
                    "dispatch": "model" if self.dispatch_with_model and self.model else "rules",
-                   "persistent": self.data_dir is not None},
+                   "persistent": self.data_dir is not None, "assistant": self.assistant_name},
                 "zones": self.site["zones"], "chargers": self.site["chargers"],
                 "machines": machines, "robots": robots,
                 "machine_history": {k: list(v) for k, v in self.machine_history.items() if k in self.machines},
@@ -955,6 +1015,7 @@ class Factory:
                 "options": {"robot_kinds": sorted(ROBOT_KINDS), "connections": sorted(CONNECTIONS),
                             "machine_types": sorted(MACHINE_TYPES), "drivers": sorted(DRIVERS),
                             "priorities": sorted(PRIORITIES)},
+                "chat": list(self.chat[-150:]),
                 "runs": [self.run_view(r) for r in sorted(self.runs.values(), key=lambda r: r["created"], reverse=True)],
                 "jobs": sorted(self.jobs.values(), key=lambda j: j["created"], reverse=True),
                 "tasks": sorted(self.tasks.values(), key=lambda t: t["created"], reverse=True),

@@ -423,5 +423,73 @@ class ProductionRunTest(unittest.TestCase):
             make_factory(None).start_run({"name": "X", "target": 1, "parts": {"rocket.gcode.3mf": 1}})
 
 
+class ChatTest(unittest.TestCase):
+    def test_print_from_chat_starts_and_robot_is_auto_assigned(self):
+        factory = make_factory(None, require_confirmation=False)
+        factory.heartbeat("RBT-001", {"zone": "Park", "battery": 90, "status": "idle"})
+        out = factory.chat_message("please print the actuator gear")
+        reply = out["messages"][-1]
+        self.assertEqual(reply["role"], "assistant")
+        self.assertIn("Starting JOB-", reply["text"])
+        job = next(iter(factory.jobs.values()))
+        self.assertEqual((job["file"], job["origin"]), ("actuator_gear.gcode.3mf", "chat"))
+        self.assertTrue(wait_for(lambda: job["status"] == "running"))
+        factory.tick()
+        task = factory.tasks[job["task_id"]]
+        self.assertEqual(task["robot_id"], "RBT-001")
+        texts = [m["text"] for m in factory.chat]
+        self.assertTrue(any("created" in t and task["id"] in t for t in texts), texts)   # progress posted to chat
+        self.assertTrue(any(f"{task['id']} -> RBT-001" in t for t in texts), texts)
+
+    def test_chosen_robot_and_machine_are_used(self):
+        factory = make_factory(None, require_confirmation=False)
+        for rid, zone in (("RBT-001", "Park"), ("RBT-002", "Far")):
+            factory.heartbeat(rid, {"zone": zone, "battery": 90, "status": "idle"})
+        factory.chat_message("print the actuator housing", machine_id="PRINTER-1", robot_id="RBT-002")
+        job = next(iter(factory.jobs.values()))
+        self.assertTrue(wait_for(lambda: job["status"] == "running"))
+        factory.tick()
+        self.assertEqual(factory.tasks[job["task_id"]]["robot_id"], "RBT-002")  # not the nearer RBT-001
+
+    def test_alert_when_no_robot_can_collect(self):
+        factory = make_factory(None, require_confirmation=False)
+        reply = factory.chat_message("print the actuator gear")["messages"][-1]["text"]
+        self.assertIn("No robots are online", reply)
+        job = next(iter(factory.jobs.values()))
+        self.assertTrue(wait_for(lambda: job["status"] == "running"))
+        factory.tick()
+        alerts = [m for m in factory.chat if m["kind"] == "alert"]
+        self.assertTrue(alerts and "Add a robot" in alerts[-1]["text"], factory.chat)
+        # the printer still holds the part, so a second print is refused
+        second = factory.chat_message("print the actuator gear")["messages"][-1]["text"]
+        self.assertIn("busy", second)
+
+    def test_no_machines_and_questions(self):
+        empty = make_factory(None, machines=[])
+        self.assertIn("No machines", empty.chat_message("print a gear")["messages"][-1]["text"])
+        factory = make_factory(None)
+        self.assertIn("robots online", factory.chat_message("what is the status?")["messages"][-1]["text"])
+
+    def test_model_reply_and_production_run(self):
+        answer = {"action": "start_production", "machine_id": "none", "file": "none", "robot_id": "none",
+                  "from_zone": "none", "to_zone": "none", "product": "Actuator gear", "quantity": 5,
+                  "reply": "On it - 5 actuator gears coming up."}
+
+        class ChatModel(FakeModel):
+            def chat_json(self, messages, schema, name, timeout=None):
+                if name == "factory_chat":
+                    self.calls.append(name)
+                    return dict(answer), {"model": "fake", "latency_s": 0.1}
+                return super().chat_json(messages, schema, name, timeout)
+
+        factory = make_factory(ChatModel(plan={"parts": [{"file": "actuator_gear.gcode.3mf", "quantity": 1}]}),
+                               require_confirmation=False)
+        reply = factory.chat_message("make 5 actuator gears")["messages"][-1]["text"]
+        self.assertIn("On it", reply)
+        run = next(iter(factory.runs.values()))
+        self.assertEqual((run["target"], run["parts"], run["origin"]), (5, {"actuator_gear.gcode.3mf": 1}, "chat"))
+        self.assertIn("factory_chat", factory.model.calls)
+
+
 if __name__ == "__main__":
     unittest.main()

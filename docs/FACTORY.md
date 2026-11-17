@@ -105,13 +105,41 @@ robofleet robot run --id RBT-001 --name "SO-101 arm" --zone "Assembly Table" \
 - Simulated and real robots can run together. Any robot ID that sends a heartbeat joins the factory, even if it is
   not listed in the factory file.
 
+## StarForge AI: the AI worker
+
+The factory has its own AI worker, **StarForge AI** (the name is set by `assistant_name` in the factory file). It
+runs on the central model (Qwen3.8-27B), but the dashboard only shows the StarForge name. Use the **StarForge AI**
+tab, or the AI Worker panel on the Overview, and type what you need in plain words:
+
+| You type | What happens |
+|---|---|
+| `print the actuator gear` | A free machine that has that file starts right away. When it finishes, the best robot collects the part. |
+| `print the cap on PRINTER-2, RBT-003 delivers it` | Uses that machine and that robot. You can also pick them in the Machine and Robot menus under the message box. |
+| `make 10 actuators` | Starts a production run of 10 units (see Production runs). |
+| `move the box from Raw Material Store to Assembly Table` | A robot task. |
+| `what's the factory status?` · `which robots are available?` | An answer from the live factory data. |
+
+The paperclip attaches a process PDF to the task, and the robot receives it. Progress of everything started from
+the chat (print started, finished, robot assigned, picked up, delivered) is posted back as updates.
+
+The AI worker also raises **alerts**: no machine is connected ("add a machine"), no machine has the file, every
+suitable machine is busy, no robot can collect a finished part ("add a robot"), or a part has waited longer than
+`robot_wait_alert_s` (default 90 s) for a robot.
+
+Every choice the model makes is checked in code: the machine must exist, have the file, be idle, and not still
+hold its previous part. If the model is offline, simple keyword matching keeps the chat working ("limited mode").
+
+API: `POST /api/chat` `{"text", "machine_id"?, "robot_id"?, "document_id"?}`. The conversation is in `/api/state`
+under `chat`.
+
 ## Operations dashboard
 
 `robofleet factory serve` serves the dashboard at `http://<host>:8080/`.
 
 | Tab | What you can do |
 |---|---|
-| Production | The landing page. **Set up once, then Run Factory**: (1) the workflow/process PDF, (2) the robots and (3) machines that are registered, (4) product name, target quantity, parts per unit and delivery zone. The right side tracks the run: progress, units produced against the target, throughput, time remaining, per-part counts and live activity. Pause, resume or stop at any time. |
+| Overview | Gauges, the **AI Worker** chat panel, machine state timeline, fleet status, task queue, active work order, deliveries chart and live floor map. This is the landing page. |
+| Production | **Set up once, then Run Factory**: (1) the workflow/process PDF, (2) the robots and (3) machines that are registered, (4) product name, target quantity, parts per unit and delivery zone. The right side tracks the run: progress, units produced against the target, throughput, time remaining, per-part counts and live activity. Pause, resume or stop at any time. |
 | Overview | Gauges for fleet availability, machine utilization (last 60 min), delivery success and fleet energy; machine state timeline (last 15 min); fleet status; task queue; active work order; deliveries per 5 min; live floor map with robots, machines and routes. Jobs awaiting approval show as a banner. |
 | Work Orders | Create a work order: request text, delivery zone (or automatic), priority (normal or urgent), and an optional work instruction PDF. Approve (**Review & Start**, with a safety check) or cancel jobs. See every robot task and its result. |
 | Robot Fleet | Register a robot or a batch: ID, name, type (mobile manipulator, robotic arm, AMR, humanoid), model, home zone, payload, capabilities and connection. Remove robots added in the dashboard. |
@@ -159,7 +187,8 @@ the browser. Robots and machines from the factory file are shown as *factory fil
   "chargers": ["Charging Dock"],
   "default_output_zone": "Output Box",
   "rules": {"battery_reserve_pct": 20, "charge_threshold_pct": 25, "max_queued_tasks_per_robot": 1, "task_battery_cost": 5},
-  "require_confirmation": true,
+  "assistant_name": "StarForge AI",
+  "require_confirmation": false,
   "dispatch": "model",
   "robot_timeout_s": 15,
   "machines": [
@@ -175,7 +204,9 @@ the browser. Robots and machines from the factory file are shown as *factory fil
 |---|---|
 | `type` | The factory theme, e.g. rocket factory or welding factory. The model reads it. |
 | `zones` | Named places with x/y positions in metres. Robot distances are computed from these. |
-| `require_confirmation` | `true`: a person must confirm before a machine starts. Keep this for printers nobody watches. |
+| `assistant_name` | The AI worker's name in the dashboard and chat (default "StarForge AI"). |
+| `require_confirmation` | `false` (the example): machines start on their own, fully autonomous. `true`: a person approves every machine start (Review & Start). |
+| `robot_wait_alert_s` | Alert when a finished part has waited this long for a robot (default 90). |
 | `dispatch` | `model` (Qwen chooses robots, checked in code) or `rules` (nearest suitable robot, fastest). |
 | `robot_timeout_s` | A robot with no heartbeat for this long goes `offline`, and its task goes back in the queue. |
 | `machines[].driver` | `bambu` (real printer) or `simulated`. `print_seconds` and `files` are only used by `simulated`. |
@@ -246,5 +277,7 @@ serve(factory, host="0.0.0.0", port=8080, token="change-me")
 - The factory API starts machines and moves robots. Keep it on a private network or VPN.
 - When robots connect over the network, start it with a token: `robofleet factory serve ... --host 0.0.0.0 --token <long random string>`.
   Robots and the CLI read the token from `ROBOFLEET_TOKEN`, and the dashboard from `http://host:8080/#token=<token>`.
-- Keep `require_confirmation: true` unless someone can see the machines.
+- The example runs fully autonomously (`require_confirmation: false`). A machine is never started while it still
+  holds its previous part, and the Bambu driver checks that the printer is idle and error-free before each print.
+  Set `require_confirmation: true` if a person must check the bed before every print.
 - The model's choices are always checked in code before anything happens. Do not bypass the checker.

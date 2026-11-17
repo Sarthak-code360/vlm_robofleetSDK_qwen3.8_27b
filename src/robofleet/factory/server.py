@@ -21,6 +21,9 @@
     DELETE /api/machines/<id>
     POST   /api/zones                        {"name", "x", "y"}
 
+    AI worker chat
+    POST   /api/chat                         {"text", "machine_id"?, "robot_id"?, "document_id"?} -> new messages
+
     Production runs (make N units autonomously)
     POST   /api/runs                         {"name", "target", "parts": {file: qty}, "description",
                                              "document_id", "deliver_to", "approve_each_job"}
@@ -61,6 +64,7 @@ ROUTES = [
     ("POST", re.compile(r"^/api/machines$"), "add_machine"),
     ("DELETE", re.compile(rf"^/api/machines/{ID}$"), "remove_machine"),
     ("POST", re.compile(r"^/api/zones$"), "add_zone"),
+    ("POST", re.compile(r"^/api/chat$"), "chat"),
     ("POST", re.compile(r"^/api/runs$"), "start_run"),
     ("POST", re.compile(rf"^/api/runs/{ID}/(pause|resume|stop)$"), "run_action"),
     ("POST", re.compile(r"^/api/documents$"), "add_document"),
@@ -166,6 +170,8 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                     "remove_machine": lambda: factory.remove_machine(arg),
                     "add_zone": lambda: factory.add_zone(body.get("name"), body.get("x"), body.get("y")),
                     "remove_document": lambda: factory.remove_document(arg),
+                    "chat": lambda: factory.chat_message(body.get("text"), body.get("machine_id") or None,
+                                                        body.get("robot_id") or None, body.get("document_id") or None),
                     "start_run": lambda: factory.start_run(body),
                     "run_action": lambda: factory.set_run_status(arg, match.group(2)),
                 }

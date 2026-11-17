@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-17
+
+### Added
+
+- StarForge AI, the factory's AI worker chat (`robofleet/factory/assistant.py`, `POST /api/chat`). Plain-language
+  requests start machines, production runs and robot tasks, and questions are answered from live factory data. You
+  can choose the machine and robot, or let it pick, and attach a process PDF. Progress updates and alerts (no
+  machine, no robot, part waiting too long) are posted to the chat.
+- Dashboard: StarForge AI tab with a chat layout (welcome screen, suggestions, composer with machine and robot
+  menus and PDF attachment), and an AI Worker panel on the Overview above Machine State.
+- Operator-chosen robots: a task can name its robot, and the dispatcher waits for that robot.
+- Factory file keys `assistant_name` and `robot_wait_alert_s`.
+
+### Changed
+
+- Tab order: Overview, Production, StarForge AI, Work Orders, Robot Fleet, Machines & Layout, Documents, Activity Log.
+  The dashboard opens on the Overview.
+- The example factory is fully autonomous (`require_confirmation: false`).
+- A machine that still holds a finished part (waiting for a robot) is not given a new job.
+
 ## [0.4.0] - 2026-11-17
 
 ### Added

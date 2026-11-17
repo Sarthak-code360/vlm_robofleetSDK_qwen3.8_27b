@@ -110,6 +110,10 @@ RBT-004 finished TASK-0002
 
 The dashboard runs the whole factory without the command line:
 
+- **StarForge AI:** the factory's own AI worker, a chat. Type "print the actuator gear" and a machine starts; when it
+  finishes, a robot is assigned and delivers the part. Optionally pick the machine and robot, or attach a process
+  PDF. It answers status questions and alerts you when a machine or robot is missing. It also sits on the Overview
+  as the AI Worker panel.
 - **Production:** set up once (process PDF, robots, machines, product, target quantity, parts per unit) and press
   **Run Factory**. Machines are kept busy, robots deliver every part, and progress is tracked until the target.
 - **Overview:** fleet availability, machine utilization, delivery success and fleet energy gauges, a machine state
