@@ -311,6 +311,45 @@ details.more{margin-top:14px;border-top:1px solid #262a33;padding-top:10px}
 details.more summary{cursor:pointer;color:var(--muted);font-size:13px}
 details.more summary:hover{color:var(--text)}
 
+.sf-card{position:relative;overflow:hidden;border-radius:18px;padding:26px 28px;border:1px solid #3a3366;
+  background:radial-gradient(120% 140% at 0% 0%,rgba(255,138,92,.16),transparent 45%),radial-gradient(120% 140% at 100% 100%,rgba(115,103,240,.28),transparent 55%),#16152a}
+.sf-head{display:flex;align-items:center;gap:16px}
+.sf-title{font-size:24px;font-weight:700;color:#fff;letter-spacing:-.02em}
+.sf-tag{color:#b9b4e6;font-size:14px;margin-top:2px}
+.sf-state{margin-left:auto;align-self:flex-start;font-size:12px;padding:4px 10px;border-radius:99px;white-space:nowrap}
+.sf-state.on{background:rgba(115,191,105,.15);color:#8fd987}.sf-state.off{background:rgba(242,204,12,.12);color:var(--yellow)}
+.sf-state.busy{background:rgba(139,128,249,.2);color:#cfc9ff}
+.cmd{display:flex;align-items:center;gap:10px;margin-top:22px;background:rgba(10,10,20,.55);border:1px solid #433c74;border-radius:16px;padding:8px 8px 8px 18px;transition:border-color .15s,box-shadow .15s}
+.cmd:focus-within{border-color:#8b80f9;box-shadow:0 0 0 4px rgba(139,128,249,.15)}
+.cmd input{flex:1;border:0 !important;background:none !important;box-shadow:none !important;font-size:16px;padding:8px 0;color:#fff}
+.cmd .send{margin-left:0;width:42px;height:42px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chips button{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:#d9d6f5;border-radius:99px;padding:6px 13px;cursor:pointer;font-size:12.5px}
+.chips button:hover{background:rgba(139,128,249,.18);border-color:#8b80f9}
+#cmd-reply{margin-top:18px}
+.sf-last{background:rgba(0,0,0,.25);border-radius:12px;padding:12px 14px}
+.sf-last-label{font-size:11.5px;color:#9a95c7;text-transform:uppercase;letter-spacing:.05em}
+.sf-last-text{color:#ecebff;margin:4px 0 6px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.sf-last-text.alert{color:#ffd0a0}
+.sf-working{display:flex;align-items:center;gap:10px;color:#cfc9ff;background:rgba(0,0,0,.25);border-radius:12px;padding:10px 14px}
+.live-card{display:flex;flex-direction:column;gap:16px}
+.live-head{display:flex;align-items:center;gap:10px}
+.pulse{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(115,191,105,.6);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(115,191,105,.55)}70%{box-shadow:0 0 0 9px rgba(115,191,105,0)}100%{box-shadow:0 0 0 0 rgba(115,191,105,0)}}
+.live-stat{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+.live-num{font-size:40px;font-weight:700;color:var(--strong);line-height:1;letter-spacing:-.02em}
+.spark{width:130px;height:44px;flex:none}
+.live-rows{display:grid;gap:12px}
+.live-row{display:flex;gap:12px;align-items:flex-start}
+.live-ico{width:34px;height:34px;border-radius:10px;flex:none;background:color-mix(in srgb,var(--c) 18%,transparent);position:relative}
+.live-ico::after{content:"";position:absolute;inset:12px;border-radius:3px;background:var(--c)}
+.live-main{flex:1;min-width:0}.live-name{color:var(--strong);font-weight:500}
+.live-text{color:var(--muted);font-size:12.5px}
+.live-bar{height:5px;border-radius:3px;background:#262a35;margin-top:6px;overflow:hidden}.live-bar i{display:block;height:100%;background:linear-gradient(90deg,#6a5ff0,#8b80f9)}
+.live-robots{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
+.live-chip{display:inline-flex;align-items:center;gap:8px;background:#1b1d26;border:1px solid #262a35;border-radius:99px;padding:6px 12px;font-size:12.5px}
+.live-chip.warn{border-color:rgba(255,152,48,.4);color:#ffd0a0}
+
 /* dialog */
 dialog{border:1px solid var(--line-2);border-radius:8px;background:var(--panel);color:var(--text);padding:0;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 40px)}
 dialog::backdrop{background:rgba(0,0,0,.6)}
@@ -360,13 +399,18 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
       <div class="kpi" id="kpi-battery"></div>
     </div>
     <div class="grid g-home mt">
-      <div class="panel ai-worker">
-        <div class="panel-head"><span class="sf-mark sm"></span><span class="panel-title assistant-name">StarForge AI</span>
-          <div class="actions"><button class="btn sm ghost" data-tab="chat">Full chat</button></div></div>
-        <div class="mini-msgs" id="chat-mini-list"></div>
-        <form class="composer mini" data-chat="mini" autocomplete="off"></form>
+      <div class="sf-card">
+        <div class="sf-head"><span class="sf-mark xl" style="width:52px;height:52px;border-radius:15px"></span>
+          <div><div class="sf-title assistant-name">StarForge AI</div><div class="sf-tag">Your factory's AI worker. Just say what you need.</div></div>
+          <span class="sf-state" id="sf-state">Online</span></div>
+        <form class="cmd" id="cmd-form" autocomplete="off">
+          <input id="cmd-input" maxlength="500" placeholder="Tell the factory what to make…">
+          <button class="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        </form>
+        <div class="chips" id="cmd-chips"></div>
+        <div id="cmd-reply"></div>
       </div>
-      <div class="panel" id="now-card"></div>
+      <div class="panel live-card" id="live-card"></div>
     </div>
     <div class="panel mt">
       <div class="panel-head"><span class="panel-title">Factory floor</span><div class="actions legend" id="map-legend"></div></div>
@@ -541,7 +585,7 @@ function render() {
   const f = S.factory;
   $("#site-sub").textContent = f.name || "";
   document.querySelectorAll(".assistant-name").forEach(el => { if (el.textContent !== f.assistant) el.textContent = f.assistant; });
-  renderChatMini(); syncComposers();
+  renderCommandCard(); syncComposers();
   const pending = S.jobs.filter(j => j.status === "awaiting_confirmation");
   const c = $("#count-approvals"); c.hidden = !pending.length; c.textContent = pending.length;
   ({production: renderProduction, overview: renderOverview, chat: renderChatTab, setup: renderSetup, activity: renderActivityTab})[tab]();
@@ -567,7 +611,7 @@ function arc(cx, cy, r, a0, a1) {
   return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 /* ------------------------------------------------------------------ StarForge AI chat */
-const chatState = {pending: null, doc: null, sending: false, lastMain: "", lastMini: ""};
+const chatState = {pending: null, doc: null, sending: false, lastMain: "", lastCmd: ""};
 const SEND = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
 const CLIP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>`;
 const SUGGESTIONS = [["Print the actuator housing", "Starts a free printer, a robot delivers it"], ["Make 10 actuators", "Plans and runs a full production"],
@@ -619,13 +663,26 @@ async function sendChat(form) {
   if (!text || chatState.sending) return;
   const body = {text, machine_id: form.querySelector('[data-pick=machine]').value || null,
                 robot_id: form.querySelector('[data-pick=robot]').value || null, document_id: chatState.doc ? chatState.doc.id : null};
-  chatState.sending = true; chatState.pending = {text, doc: chatState.doc, machine: body.machine_id, robot: body.robot_id};
   ta.value = ""; ta.style.height = "auto"; chatState.doc = null;
   form.querySelector('[data-pick=machine]').value = ""; form.querySelector('[data-pick=robot]').value = "";
-  syncComposers(true); renderChatMini(); if (tab === "chat") renderChatTab();
+  if (!await postChat(body)) ta.value = text;
+}
+async function postChat(body) {
+  if (chatState.sending) return false;
+  const lastId = S && S.chat.length ? S.chat[S.chat.length - 1].id : 0;
+  chatState.sending = true;
+  chatState.pending = {text: body.text, doc: body.document_id ? {name: (S.documents.find(d => d.id === body.document_id) || {}).name} : null,
+                       machine: body.machine_id, robot: body.robot_id, after: lastId};
+  rerenderChat();
+  let ok = true;
   try { await api("/api/chat", {body}); }
-  catch (e) { toast(e.message, "bad"); ta.value = text; }
-  finally { chatState.sending = false; chatState.pending = null; await refresh(); syncComposers(true); renderChatMini(); if (tab === "chat") renderChatTab(); }
+  catch (e) { toast(e.message, "bad"); ok = false; }
+  finally { chatState.sending = false; chatState.pending = null; await refresh(); rerenderChat(); }
+  return ok;
+}
+function rerenderChat() {
+  chatState.lastMain = ""; chatState.lastCmd = "";
+  syncComposers(true); renderCommandCard(); if (tab === "chat") renderChatTab();
 }
 function msgHTML(m) {
   const name = esc(S.factory.assistant);
@@ -637,9 +694,14 @@ function msgHTML(m) {
     : `<div class="who">${m.kind === "alert" ? "<b style='color:var(--orange)'>Alert</b>" : "Update"} · ${fmtTime(m.ts)}</div>`;
   return `<div class="msg ${esc(m.kind)}"><span class="sf-mark sm"></span><div class="body">${head}<div class="text">${richText(m.text)}</div></div></div>`;
 }
+function pendingEchoed() {
+  // the server stores the user's message as soon as it arrives; after that only the typing dots are drawn
+  const p = chatState.pending;
+  return !!p && S.chat.some(m => m.id > p.after && m.role === "user" && m.text === p.text.trim());
+}
 function pendingHTML() {
   const p = chatState.pending; if (!p) return "";
-  return msgHTML({role: "user", text: p.text, machine_id: p.machine, robot_id: p.robot, document: p.doc}) +
+  return (pendingEchoed() ? "" : msgHTML({role: "user", text: p.text, machine_id: p.machine, robot_id: p.robot, document: p.doc})) +
     `<div class="msg reply"><span class="sf-mark sm"></span><div class="body"><div class="who"><b>${esc(S.factory.assistant)}</b> · thinking</div><div class="typing"><i></i><i></i><i></i></div></div></div>`;
 }
 function renderChatTab() {
@@ -653,15 +715,59 @@ function renderChatTab() {
     : S.chat.map(msgHTML).join("") + pendingHTML();
   if (atBottom || chatState.pending) scroller.scrollTop = scroller.scrollHeight;
 }
-function renderChatMini() {
-  if (!S) return;
-  const key = JSON.stringify([S.chat.length && S.chat[S.chat.length - 1].id, !!chatState.pending]);
-  if (key === chatState.lastMini) return; chatState.lastMini = key;
-  const el = $("#chat-mini-list");
-  el.innerHTML = (!S.chat.length && !chatState.pending)
-    ? `<div class="msg-empty">Ask ${esc(S.factory.assistant)} to print a part, start production, or report status. Machines start and robots are assigned automatically.</div>`
-    : S.chat.slice(-8).map(msgHTML).join("") + pendingHTML();
-  el.scrollTop = el.scrollHeight;
+function renderCommandCard() {
+  if (!S || !$("#cmd-reply")) return;
+  const working = !!chatState.pending;
+  const st = $("#sf-state");
+  st.className = "sf-state " + (working ? "busy" : S.factory.model ? "on" : "off");
+  st.textContent = working ? "Working…" : S.factory.model ? "Online" : "Limited mode";
+  const files = [...new Set(S.machines.flatMap(m => m.files))];
+  const chips = [files[0] && `Print the ${fileLabel(files[0])}`, "Make 5 actuators", "How is the factory doing?", "Which robots are free?"].filter(Boolean);
+  const csig = JSON.stringify(chips);
+  if ($("#cmd-chips").dataset.sig !== csig) {
+    $("#cmd-chips").dataset.sig = csig;
+    $("#cmd-chips").innerHTML = chips.map(c => `<button type="button" data-action="cmd-chip" data-text="${esc(c)}">${esc(c)}</button>`).join("");
+  }
+  const last = [...S.chat].reverse().find(m => m.role === "assistant");
+  const key = JSON.stringify([working, last && last.id]);
+  if (key === chatState.lastCmd) return; chatState.lastCmd = key;
+  $("#cmd-reply").innerHTML = working
+    ? `<div class="sf-working"><div class="typing"><i></i><i></i><i></i></div><span>On it…</span></div>`
+    : last ? `<div class="sf-last"><span class="sf-last-label">${last.kind === "alert" ? "⚠ Alert" : "Latest"} · ${ago(S.now - last.ts)}</span>
+        <div class="sf-last-text${last.kind === "alert" ? " alert" : ""}">${richText(last.text)}</div>
+        <button type="button" class="link" data-tab="chat">Open conversation →</button></div>`
+    : `<div class="sf-last"><div class="sf-last-text muted">Machines start and robots are assigned automatically. You just say what you need.</div></div>`;
+}
+function renderLive() {
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  const done = S.tasks.filter(t => t.status === "done" && t.finished);
+  const today = done.filter(t => t.finished * 1000 >= midnight.getTime()).length;
+  const bins = Array(12).fill(0);
+  done.forEach(t => { const i = 11 - Math.floor((S.now - t.finished) / 300); if (i >= 0 && i < 12) bins[i]++; });
+  const max = Math.max(1, ...bins);
+  const spark = `<svg class="spark" viewBox="0 0 120 40" preserveAspectRatio="none">${bins.map((v, i) =>
+    `<rect x="${i * 10 + 1}" y="${40 - Math.max(2, 38 * v / max)}" width="8" height="${Math.max(2, 38 * v / max)}" rx="2" fill="${v ? "#8b80f9" : "#262a35"}"/>`).join("")}</svg>`;
+  const machineRows = S.machines.slice(0, 4).map(m => {
+    const holding = S.jobs.some(j => j.machine_id === m.id && j.status === "done");
+    const job = S.jobs.find(j => j.machine_id === m.id && ["running", "starting"].includes(j.status));
+    const [text, col] = m.state === "offline" ? ["Offline", COLORS.grey] : m.state === "error" ? ["Needs attention", COLORS.red]
+      : job || m.state === "busy" ? [`Making ${fileLabel((job || {}).file || m.job || "a part")}`, COLORS.blue]
+      : holding ? ["Part ready, robot on the way", COLORS.purple] : ["Ready", COLORS.green];
+    const pct = (job || m.state === "busy") && m.progress_pct != null ? m.progress_pct : null;
+    return `<div class="live-row"><span class="live-ico" style="--c:${col}"></span><div class="live-main"><div class="live-name">${esc(m.name)}</div>
+      <div class="live-text">${esc(text)}${pct != null ? ` · ${pct}%` : ""}</div>${pct != null ? `<div class="live-bar"><i style="width:${pct}%"></i></div>` : ""}</div></div>`;
+  }).join("");
+  const moving = S.tasks.filter(t => ["assigned", "in_progress"].includes(t.status));
+  const waiting = S.tasks.filter(t => t.status === "pending").length;
+  const ready = S.robots.filter(r => r.status === "idle").length;
+  const robotLine = moving.length
+    ? moving.slice(0, 3).map(t => `<div class="live-chip"><span class="dot live"></span>${esc((S.robots.find(r => r.id === t.robot_id) || {}).name || t.robot_id)} → ${esc(t.to_zone)}</div>`).join("")
+    : `<div class="live-chip"><span class="dot ${ready ? "live" : "down"}"></span>${ready} robot${ready === 1 ? "" : "s"} ready</div>`;
+  $("#live-card").innerHTML = `
+    <div class="live-head"><span class="pulse"></span><span class="panel-title">Live</span><span class="muted" style="margin-left:auto;font-size:12.5px">last hour</span></div>
+    <div class="live-stat"><div><div class="live-num">${today}</div><div class="muted">part${today === 1 ? "" : "s"} delivered today</div></div>${spark}</div>
+    <div class="live-rows">${machineRows || `<div class="muted">No machines yet. Add one in Setup.</div>`}</div>
+    <div class="live-robots">${robotLine}${waiting ? `<div class="live-chip warn">${waiting} part${waiting === 1 ? "" : "s"} waiting for a robot</div>` : ""}</div>`;
 }
 
 /* ------------------------------------------------------------------ production */
@@ -851,28 +957,8 @@ function renderOverview() {
     <button class="btn sm danger" data-action="cancel-job" data-id="${esc(j.id)}">Cancel</button>
     <button class="btn sm go" data-action="approve-job" data-id="${esc(j.id)}">Start</button></div>`).join("");
 
-  renderNow();
+  renderLive();
   renderMap();
-}
-function renderNow() {
-  const run = activeRun();
-  const job = ["running", "starting", "done"].map(st => S.jobs.find(j => j.status === st)).find(Boolean);
-  const moving = S.tasks.filter(t => t.status === "in_progress" || t.status === "assigned").slice(0, 3);
-  const alert = [...S.chat].reverse().find(m => m.kind === "alert" && S.now - m.ts < 600);
-  let head;
-  if (run) head = `<div class="k-label">Production</div><div class="now-big">${esc(run.name)}</div>
-      <div class="bar" style="height:10px"><i style="width:${run.progress_pct}%"></i></div>
-      <div class="now-sub">${run.units} of ${run.target} made · ${Math.round(run.progress_pct)}%${run.status === "paused" ? " · paused" : ""}</div>`;
-  else if (job) {
-    const m = S.machines.find(x => x.id === job.machine_id) || {};
-    const pct = job.status === "running" ? (m.progress_pct ?? 0) : job.status === "done" ? 100 : 0;
-    head = `<div class="k-label">Right now</div><div class="now-big">${job.status === "done" ? "Waiting for a robot to collect" : "Making"} ${esc(fileLabel(job.file))}</div>
-      <div class="bar" style="height:10px"><i style="width:${pct}%"></i></div>
-      <div class="now-sub">${esc(m.name || job.machine_id)} · ${pct}%</div>`;
-  } else head = `<div class="k-label">Right now</div><div class="now-big">All quiet</div>
-      <div class="now-sub">Ask ${esc(S.factory.assistant)} to make something.</div>`;
-  const list = moving.map(t => `<div class="now-item"><span class="dot live"></span><span><b>${esc((S.robots.find(r => r.id === t.robot_id) || {}).name || t.robot_id)}</b> taking ${esc(t.instruction.match(/'([^']+)'/) ? fileLabel(t.instruction.match(/'([^']+)'/)[1]) : "an item")} to ${esc(t.to_zone)}</span></div>`).join("");
-  $("#now-card").innerHTML = head + (list ? `<div class="now-list">${list}</div>` : "") + (alert ? `<div class="alert-line">⚠ ${esc(alert.text)}</div>` : "");
 }
 function machineName(id) { const m = S.machines.find(x => x.id === id); return m && m.name !== m.id ? `${m.name} (${id})` : id; }
 
@@ -1138,6 +1224,7 @@ document.addEventListener("click", e => {
     case "add-zone": return dlgAddZone();
     case "remove-doc": return dlgConfirm(`Delete ${id}`, `Delete document <b>${esc(id)}</b>? Work orders that reference it will no longer be able to open it.`, "Delete", () => api(`/api/documents/${encodeURIComponent(id)}`, {method: "DELETE"}));
     case "ev-filter": evFilter = id; return renderActivity();
+    case "cmd-chip": return postChat({text: a.dataset.text});
     case "chat-clear-doc": chatState.doc = null; return syncComposers(true);
     case "suggest": { const f = document.querySelector('form.composer[data-chat=main]'); f.querySelector("textarea").value = a.dataset.text; return sendChat(f); }
     case "setup-clear-doc": setup.docId = null; saveSetup(); return renderProduction();
@@ -1154,6 +1241,13 @@ drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", async e => { e.preventDefault(); drop.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) { try { await uploadDoc(f); refresh(); } catch (err) { toast(err.message, "bad"); } } });
 
 initComposers();
+$("#cmd-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const input = $("#cmd-input"), text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  if (!await postChat({text})) input.value = text;
+});
 setTab(tab);
 refresh().then(() => { if (tab === "orders") buildOrderForm(); });
 setInterval(refresh, 2000);
