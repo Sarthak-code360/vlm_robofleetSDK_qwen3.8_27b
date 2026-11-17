@@ -97,7 +97,7 @@ robofleet robot sim --count 10
 robofleet factory request "print the actuator housing" --confirm
 ```
 
-Open **http://localhost:8080** for the **Operations Center** dashboard. The printer "prints" for 20 s. The nearest
+Open **http://localhost:8080** for the **Autonomous Factory** dashboard. The printer "prints" for 20 s. The nearest
 suitable robot then picks up the part from the Print Bay and brings it to the Output Box:
 
 ```
@@ -110,6 +110,8 @@ RBT-004 finished TASK-0002
 
 The dashboard runs the whole factory without the command line:
 
+- **Production:** set up once (process PDF, robots, machines, product, target quantity, parts per unit) and press
+  **Run Factory**. Machines are kept busy, robots deliver every part, and progress is tracked until the target.
 - **Overview:** fleet availability, machine utilization, delivery success and fleet energy gauges, a machine state
   timeline, fleet status, deliveries chart and a live floor map with robot positions and active routes.
 - **Work Orders:** describe the work in plain language, choose the delivery zone and priority, and attach a work

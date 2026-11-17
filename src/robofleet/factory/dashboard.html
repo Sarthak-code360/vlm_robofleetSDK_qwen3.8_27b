@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RoboFleet Operations Center</title>
+<title>Autonomous Factory</title>
 <style>
 :root{
   color-scheme:dark;
   --bg:#0b0c0f;--panel:#16181d;--panel-2:#1c1f25;--line:#262a31;--line-2:#323741;
   --text:#d9dce1;--strong:#f3f4f6;--muted:#8b919c;--faint:#5c626d;
   --green:#73bf69;--yellow:#f2cc0c;--orange:#ff9830;--red:#f2495c;--blue:#5794f2;--purple:#b877d9;--cyan:#4fc3c7;
-  --accent:#5794f2;--radius:6px;
+  --accent:#7367f0;--accent-2:#8b80f9;--radius:6px;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}
 *{scrollbar-color:#323741 transparent}
+input[type=checkbox]{accent-color:var(--accent)}
 html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
@@ -24,10 +25,10 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
 .topbar{position:sticky;top:0;z-index:20;background:rgba(11,12,15,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
 .topbar-inner{display:flex;align-items:center;gap:16px;padding:10px 20px;max-width:1680px;margin:0 auto}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
-.brand-mark{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#f2cc0c 0%,#ff9830 55%,#f2495c 100%);display:grid;place-items:center;flex:none}
-.brand-mark svg{width:18px;height:18px}
+.brand-mark{width:34px;height:34px;display:grid;place-items:center;flex:none}
+.brand-mark svg{width:32px;height:32px}
 .brand-text{min-width:0}
-.brand-title{font-weight:600;color:var(--strong);font-size:14px;letter-spacing:.01em;white-space:nowrap}
+.brand-title{font-weight:700;color:var(--strong);font-size:17px;letter-spacing:-.005em;white-space:nowrap}
 .brand-sub{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--line-2);border-radius:99px;color:var(--muted);font-size:12px;white-space:nowrap}
@@ -92,7 +93,7 @@ main{max-width:1680px;margin:0 auto;padding:16px 20px 40px}
 .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;margin-top:10px;font-size:12.5px}
 .kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .progress{height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden;margin-top:10px}
-.progress>i{display:block;height:100%;background:var(--green);transition:width .6s}
+.progress>i{display:block;height:100%;background:var(--accent-2);transition:width .6s}
 .stat-num{font-size:34px;font-weight:600;line-height:1.1;color:var(--strong)}
 
 /* map */
@@ -133,7 +134,7 @@ td.act{text-align:right}td.act .btn+.btn{margin-left:6px}
 .btn:hover{border-color:#4a505c;background:#23272e}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn.primary:hover{background:#6ba1f5}
+.btn.primary:hover{background:var(--accent-2);border-color:var(--accent-2)}
 .btn.go{background:#2f7d32;border-color:#3f9a43;color:#fff}.btn.go:hover{background:#3a8d3e}
 .btn.danger{color:var(--red)}.btn.danger:hover{border-color:var(--red)}
 .btn.sm{padding:4px 9px;font-size:12px}
@@ -167,6 +168,66 @@ pre.cmd{margin:8px 0 0;padding:10px 12px;background:#0f1115;border:1px solid var
 .spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rot .8s linear infinite}
 @keyframes rot{to{transform:rotate(360deg)}}
 
+/* production */
+.status-pill{padding:6px 14px;font-size:13px;color:var(--text);background:#14171c}
+.status-pill .dot{width:10px;height:10px}
+.dot.paused{background:var(--yellow);box-shadow:0 0 0 3px rgba(242,204,12,.18)}
+.dot.done{background:var(--accent-2);box-shadow:0 0 0 3px rgba(139,128,249,.2)}
+.g-prod{grid-template-columns:minmax(340px,1fr) minmax(0,1.4fr);align-items:start}
+@media (max-width:1000px){.g-prod{grid-template-columns:minmax(0,1fr)}}
+.card-xl{background:linear-gradient(180deg,#181a22,#15171c);border:1px solid #262a35;border-radius:14px;padding:24px 26px}
+.card-xl h2{margin:0;font-size:22px;color:var(--strong);font-weight:700;letter-spacing:-.01em}
+.card-xl .lead{color:var(--muted);margin:4px 0 0;font-size:14px}
+.step{margin-top:22px}
+.step-title{font-size:15px;font-weight:600;color:var(--strong);margin-bottom:10px}
+.box{border:1px solid #2c303b;border-radius:10px;padding:14px 16px;background:#13151a}
+.split{display:grid;grid-template-columns:1fr 1.3fr;gap:16px}
+.split>div+div{border-left:1px solid #2c303b;padding-left:16px}
+.split .k{color:var(--muted);font-size:12.5px;margin-bottom:6px}
+.split .v{font-size:16px;color:var(--strong);font-weight:500}
+.num-chip{display:inline-block;min-width:38px;padding:4px 10px;border:1px solid #2c303b;border-radius:7px;background:#0f1115;font-size:16px;font-weight:600;color:var(--strong);text-align:center}
+.file-chip{display:flex;align-items:center;gap:14px}
+.file-chip .pdf{width:34px;height:40px;border-radius:4px;background:#e9eaee;color:#333;font-size:10px;font-weight:800;display:grid;place-items:end center;padding-bottom:6px;clip-path:polygon(0 0,72% 0,100% 22%,100% 100%,0 100%);flex:none}
+.file-chip .meta{flex:1;min-width:0}.file-chip .meta b{display:block;color:var(--strong);font-weight:500;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-chip .meta span{color:var(--muted);font-size:12.5px}
+.x-btn{background:none;border:0;color:var(--muted);font-size:22px;cursor:pointer;padding:0 4px;line-height:1}.x-btn:hover{color:var(--strong)}
+.parts{display:grid;gap:8px}
+.part-row{display:grid;grid-template-columns:auto minmax(0,1fr) 74px;gap:10px;align-items:center}
+.part-row input[type=number]{padding:5px 8px}
+.btn.run{width:100%;justify-content:center;padding:14px;font-size:16px;font-weight:600;border-radius:10px;margin-top:24px;background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.run:hover{background:var(--accent-2)}
+.btn.run svg{width:18px;height:18px}
+.run-controls{display:flex;gap:10px;margin-top:24px}.run-controls .btn{flex:1;justify-content:center;padding:12px;font-size:14.5px;border-radius:10px}
+.task-label{color:var(--muted);font-size:16px}
+.task-name{font-size:32px;font-weight:700;color:var(--strong);letter-spacing:-.015em;line-height:1.15;word-break:break-word}
+.pill-lg{padding:8px 16px;border-radius:10px;font-size:15px;font-weight:600;white-space:nowrap}
+.pill-lg.running{background:rgba(115,191,105,.14);color:#8fd987}.pill-lg.paused{background:rgba(242,204,12,.13);color:var(--yellow)}
+.pill-lg.completed{background:rgba(139,128,249,.16);color:#b3abff}.pill-lg.stopped{background:rgba(139,145,156,.14);color:var(--muted)}
+.hr{height:1px;background:#262a35;margin:22px 0}
+.prog-head{display:flex;justify-content:space-between;align-items:baseline;font-size:17px;color:var(--muted)}
+.prog-head b{font-size:26px;color:var(--strong);font-weight:700}
+.bar{height:16px;border-radius:99px;background:#262a35;overflow:hidden;margin-top:12px}
+.bar>i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#6a5ff0,#8b80f9);transition:width .8s ease}
+.bigstats{display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:26px}
+.bigstats .ico svg{width:72px;height:72px;stroke:#e9eaee}
+.bigstats .lbl{color:var(--muted);font-size:15px}
+.bigstats .val{font-size:48px;font-weight:700;color:var(--strong);line-height:1.1}
+.bigstats .val small{font-size:20px;font-weight:500;color:var(--text);margin-left:6px}
+.bigstats .sep{border-left:1px solid #262a35;padding-left:26px}
+@media (max-width:640px){.bigstats{grid-template-columns:1fr 1fr}.bigstats .ico{display:none}.bigstats .val{font-size:36px}}
+.mini-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.mini-stats div{background:#13151a;border:1px solid #262a35;border-radius:10px;padding:10px 12px}
+.mini-stats span{display:block;color:var(--muted);font-size:12px}.mini-stats b{font-size:17px;color:var(--strong);font-weight:600}
+@media (max-width:640px){.mini-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.part-bar{height:6px;border-radius:3px;background:#262a35;overflow:hidden;min-width:80px}
+.part-bar i{display:block;height:100%;background:var(--accent-2)}
+.feed{display:grid;gap:6px;font-size:12.5px}
+.feed div{display:grid;grid-template-columns:auto 1fr;gap:10px;color:var(--text)}
+.feed time{color:var(--faint);font-family:var(--mono)}
+.empty-run{text-align:center;padding:50px 10px;color:var(--muted)}
+.empty-run svg{width:64px;height:64px;stroke:#3a3f4b;margin-bottom:10px}
+.link{background:none;border:0;color:var(--accent-2);cursor:pointer;padding:0;font:inherit}.link:hover{text-decoration:underline}
+
 /* dialog */
 dialog{border:1px solid var(--line-2);border-radius:8px;background:var(--panel);color:var(--text);padding:0;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 40px)}
 dialog::backdrop{background:rgba(0,0,0,.6)}
@@ -187,21 +248,22 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
-      <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M12 8V4M9 13h.01M15 13h.01M3 13h2M19 13h2"/></svg></div>
+      <div class="brand-mark"><svg viewBox="0 0 32 32" fill="none" stroke="#8b80f9" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M3 28V14l7 4.5V14l7 4.5V14l7 4.5V5h5v23z"/><path d="M8 23h2M14 23h2M20 23h2"/></svg></div>
       <div class="brand-text">
-        <div class="brand-title">RoboFleet Operations Center</div>
+        <div class="brand-title">Autonomous Factory</div>
         <div class="brand-sub" id="site-sub">Connecting…</div>
       </div>
     </div>
     <div class="top-right">
       <span class="chip hide-sm" id="chip-model">Orchestrator <b>—</b></span>
-      <span class="chip"><span class="dot" id="live-dot"></span><span id="live-text">Connecting</span></span>
+      <span class="chip status-pill"><span class="dot" id="live-dot"></span><span id="live-text">Connecting</span></span>
       <span class="clock hide-sm" id="clock"></span>
       <button class="btn primary" data-action="new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>
     </div>
   </div>
   <nav class="tabs" id="tabs">
-    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab active" data-tab="production">Production</button>
+    <button class="tab" data-tab="overview">Overview</button>
     <button class="tab" data-tab="orders">Work Orders<span class="count" id="count-approvals" hidden></span></button>
     <button class="tab" data-tab="fleet">Robot Fleet</button>
     <button class="tab" data-tab="machines">Machines &amp; Layout</button>
@@ -212,7 +274,28 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 
 <main>
   <!-- ================= OVERVIEW ================= -->
-  <section class="view active" id="view-overview">
+  <section class="view active" id="view-production">
+    <div class="grid g-prod">
+      <div class="card-xl">
+        <h2>Set Up Production</h2>
+        <p class="lead" id="setup-lead">Provide the task details to run the factory autonomously.</p>
+        <form id="setup-form" autocomplete="off">
+          <div class="step"><div class="step-title">1. Workflow / Process (PDF)</div>
+            <div class="box" id="setup-doc"></div></div>
+          <div class="step"><div class="step-title">2. Robots</div>
+            <div class="box split" id="setup-robots"></div></div>
+          <div class="step"><div class="step-title">3. Machines</div>
+            <div class="box split" id="setup-machines"></div></div>
+          <div class="step" id="setup-product-step"><div class="step-title">4. Product &amp; Target</div>
+            <div class="box stack" id="setup-product"></div></div>
+          <div id="setup-actions"></div>
+        </form>
+      </div>
+      <div class="card-xl" id="run-panel"></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-overview">
     <div id="approval-banner"></div>
     <div class="grid g4">
       <div class="panel"><div class="panel-head"><span class="panel-title">Fleet Availability</span></div><div id="g-avail"></div><div class="gauge-foot" id="g-avail-foot"></div></div>
@@ -356,14 +439,17 @@ const badge = (group, s) => { const [t, c] = LABELS[group][s] || [s, "grey"]; re
 const colorOf = (group, s) => COLORS[(LABELS[group][s] || [0, "grey"])[1]];
 
 /* ------------------------------------------------------------------ state */
-let S = null, tab = (location.hash.match(/tab=(\w+)/) || [])[1] || store.get("rf.tab") || "overview", evFilter = "all", busy = false;
+let S = null, tab = (location.hash.match(/tab=(\w+)/) || [])[1] || store.get("rf.tab") || "production", evFilter = "all", busy = false;
 const ONLINE = new Set(["idle", "busy", "charging"]);
 
 async function refresh() {
   if (busy) return; busy = true;
   try {
     S = await api("/api/state");
-    $("#live-dot").className = "dot live"; $("#live-text").textContent = "Live";
+    const run = activeRun(), last = S.runs[0];
+    const [cls, label] = run ? (run.status === "running" ? ["live", "Factory Running"] : ["paused", "Factory Paused"])
+      : last && last.status === "completed" && S.now - last.finished < 600 ? ["done", "Run Completed"] : ["", "Factory Idle"];
+    $("#live-dot").className = "dot " + cls; $("#live-text").textContent = label;
     render();
   } catch (e) {
     $("#live-dot").className = "dot down"; $("#live-text").textContent = e.message.includes("token") ? "Unauthorized" : "Disconnected";
@@ -375,7 +461,7 @@ function render() {
   $("#chip-model").innerHTML = `Orchestrator <b>${esc(f.model || "Rule engine")}</b> · Dispatch <b>${f.dispatch === "model" ? "AI" : "Rules"}</b>`;
   const pending = S.jobs.filter(j => j.status === "awaiting_confirmation");
   const c = $("#count-approvals"); c.hidden = !pending.length; c.textContent = pending.length;
-  ({overview: renderOverview, orders: renderOrders, fleet: renderFleet, machines: renderMachines,
+  ({production: renderProduction, overview: renderOverview, orders: renderOrders, fleet: renderFleet, machines: renderMachines,
     documents: renderDocuments, activity: renderActivity})[tab]();
 }
 function setTab(t) {
@@ -438,6 +524,165 @@ function bars(values, labels) {
     if (i % 3 === 0) out += `<text x="${x + (bw - 6) / 2}" y="${H - 6}" text-anchor="middle" font-size="10.5" fill="#8b919c">${labels[i]}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">${grid}${out}</svg>`;
+}
+
+/* ------------------------------------------------------------------ production */
+const setup = (() => { try { return JSON.parse(store.get("rf.setup") || "{}") || {}; } catch (e) { return {}; } })();
+const saveSetup = () => store.set("rf.setup", JSON.stringify(setup));
+const RUN_LABEL = {running: "In Progress", paused: "Paused", completed: "Completed", stopped: "Stopped"};
+const COG = `<svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+const PLAY = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>`;
+let sig = {};
+const changed = (key, value) => { const v = JSON.stringify(value); if (sig[key] === v) return false; sig[key] = v; return true; };
+const activeRun = () => S && S.runs.find(r => r.status === "running" || r.status === "paused");
+const dur = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
+const fileLabel = f => f.replace(/\.gcode\.3mf$/i, "").replace(/[_-]+/g, " ");
+
+function idRange(ids) {
+  if (!ids.length) return "—";
+  const sorted = [...ids].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  return sorted.length === 1 ? sorted[0] : `${sorted[0]} – ${sorted[sorted.length - 1]}`;
+}
+function renderProduction() {
+  const run = activeRun(), shown = run || S.runs[0], locked = !!run;
+  $("#setup-lead").textContent = locked ? `Production run ${run.id} is ${RUN_LABEL[run.status].toLowerCase()}. Pause or stop it to change the setup.`
+                                        : "Provide the task details to run the factory autonomously.";
+  // 1. process document
+  const docs = S.documents, doc = locked ? run.document : docs.find(d => d.id === setup.docId);
+  if (changed("doc", [locked, doc && doc.id, docs.map(d => d.id), S.factory.persistent])) {
+    const full = doc && docs.find(d => d.id === doc.id);
+    $("#setup-doc").innerHTML = doc ? `<div class="file-chip"><div class="pdf">PDF</div><div class="meta"><b title="${esc(doc.name)}">${esc(doc.name)}</b>
+        <span>${full ? fmtSize(full.size) + " · " : ""}<a href="${docUrl(doc.id)}" target="_blank" rel="noopener">Open</a></span></div>
+        ${locked ? "" : `<button type="button" class="x-btn" data-action="setup-clear-doc" aria-label="Remove document">×</button>`}</div>`
+      : locked ? `<span class="muted">No process document attached.</span>`
+      : !S.factory.persistent ? `<span class="muted">Document upload needs the server's <span class="mono">--data-dir</span>.</span>`
+      : `<label class="drop" id="setup-drop" style="padding:14px"><input type="file" accept="application/pdf,.pdf" id="setup-file" hidden>
+          <b>Upload process PDF</b> · click or drop · sent to every robot task</label>
+         ${docs.length ? `<select id="setup-doc-select" class="mt"><option value="">…or choose an uploaded document</option>${docs.map(d => `<option value="${esc(d.id)}">${esc(d.id)} · ${esc(d.name)}</option>`).join("")}</select>` : ""}`;
+    const fi = $("#setup-file"), sel = $("#setup-doc-select"), dz = $("#setup-drop");
+    const take = async file => { try { setup.docId = (await uploadDoc(file)).id; saveSetup(); await refresh(); } catch (e) { toast(e.message, "bad"); } };
+    if (fi) fi.onchange = () => fi.files[0] && take(fi.files[0]);
+    if (sel) sel.onchange = () => { setup.docId = sel.value; saveSetup(); renderProduction(); };
+    if (dz) { dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); }; dz.ondragleave = () => dz.classList.remove("over");
+      dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); e.dataTransfer.files[0] && take(e.dataTransfer.files[0]); }; }
+  }
+  // 2. robots
+  const online = S.robots.filter(r => ONLINE.has(r.status));
+  const working = S.robots.filter(r => r.status === "busy").length;
+  $("#setup-robots").innerHTML = `<div><div class="k">Number of Robots</div><span class="num-chip">${S.robots.length}</span></div>
+    <div><div class="k">Robot IDs</div><div class="v">${esc(idRange(S.robots.map(r => r.id)))}</div>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">${online.length} online · ${working} working · <button type="button" class="link" data-tab="fleet">Manage fleet</button></div></div>`;
+  // 3. machines
+  const types = {};
+  S.machines.forEach(m => { const t = MTYPES[m.type] || m.type; types[t] = (types[t] || 0) + 1; });
+  $("#setup-machines").innerHTML = `<div><div class="k">Number of Machines</div><span class="num-chip">${S.machines.length}</span></div>
+    <div><div class="k">Types</div><div class="v">${esc(Object.entries(types).map(([t, n]) => `${t} (${n})`).join(", ") || "—")}</div>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">${S.machines.filter(m => m.state === "busy").length} running · <button type="button" class="link" data-tab="machines">Manage machines</button></div></div>`;
+  // 4. product + actions
+  const files = [...new Set(S.machines.flatMap(m => m.files))].sort();
+  const real = S.machines.some(m => m.driver !== "SimulatedPrinter");
+  if (changed("product", [locked && run.id, files, Object.keys(S.zones)])) {
+    if (locked) {
+      $("#setup-product").innerHTML = `<dl class="kv" style="margin:0"><dt>Product</dt><dd>${esc(run.name)}</dd><dt>Target</dt><dd>${run.target} units</dd>
+        <dt>Parts per unit</dt><dd style="white-space:normal">${Object.entries(run.parts).map(([f, q]) => `${q}× <span class="mono">${esc(f)}</span>`).join("<br>")}</dd>
+        <dt>Deliver to</dt><dd>${esc(run.deliver_to)}</dd><dt>Machine starts</dt><dd>${run.approve_each_job ? "Approved by an operator" : "Automatic"}</dd></dl>`;
+    } else {
+      const zones = Object.keys(S.zones), parts = setup.parts || {};
+      $("#setup-product").innerHTML = `
+        <div class="form-grid">
+          <label class="field full"><span>Product / task name</span><input type="text" name="name" maxlength="60" placeholder="e.g. Actuator Assembly" value="${esc(setup.name || "")}"></label>
+          <label class="field"><span>Target quantity</span><input type="number" name="target" min="1" max="100000" value="${esc(setup.target || 10)}"></label>
+          <label class="field"><span>Deliver finished parts to</span><select name="deliver_to">${zones.map(z => `<option ${z === (setup.deliver_to || S.factory.default_output_zone) ? "selected" : ""}>${esc(z)}</option>`).join("")}</select></label>
+        </div>
+        <div class="field"><span class="muted" style="font-size:12px;font-weight:500">Parts per unit</span>
+          <div class="parts">${files.length ? files.map(f => `<label class="part-row"><input type="checkbox" data-part="${esc(f)}" ${parts[f] ? "checked" : ""}>
+            <span class="mono" style="overflow:hidden;text-overflow:ellipsis">${esc(f)}</span>
+            <input type="number" min="1" max="100" data-qty="${esc(f)}" value="${esc(parts[f] || 1)}" title="Quantity per unit"></label>`).join("")
+            : `<span class="muted">No job files on any machine yet.</span>`}</div>
+          <small class="faint">Leave all unticked to let the orchestrator choose the parts from the product name.</small></div>
+        <label class="check"><input type="checkbox" name="approve" ${(setup.approve ?? real) ? "checked" : ""}><span>Operator approves every machine start${real ? " (recommended for real printers)" : ""}</span></label>`;
+      $("#setup-product").oninput = () => {
+        const f = $("#setup-form");
+        Object.assign(setup, {name: f.elements.name.value, target: Number(f.elements.target.value) || 1, deliver_to: f.deliver_to.value, approve: f.approve.checked, parts: {}});
+        document.querySelectorAll("[data-part]").forEach(cb => { if (cb.checked) setup.parts[cb.dataset.part] = Number(document.querySelector(`[data-qty="${CSS.escape(cb.dataset.part)}"]`).value) || 1; });
+        saveSetup();
+      };
+    }
+  }
+  if (changed("actions", [locked && run.id, run && run.status])) {
+    $("#setup-actions").innerHTML = !locked
+      ? `<button class="btn run" id="run-btn" ${files.length ? "" : "disabled"}>${PLAY} Run Factory</button>`
+      : `<div class="run-controls">${run.status === "running"
+            ? `<button type="button" class="btn" data-action="run-pause" data-id="${esc(run.id)}">Pause</button>`
+            : `<button type="button" class="btn primary" data-action="run-resume" data-id="${esc(run.id)}">${PLAY} Resume</button>`}
+          <button type="button" class="btn danger" data-action="run-stop" data-id="${esc(run.id)}">Stop Run</button></div>`;
+  }
+  renderRunPanel(shown);
+}
+
+function renderRunPanel(run) {
+  if (!run) {
+    $("#run-panel").innerHTML = `<div class="empty-run">${COG.replace("<svg", '<svg style="width:64px;height:64px;stroke:#3a3f4b"')}
+      <div style="font-size:18px;color:var(--text);font-weight:600">No production running</div>
+      <p>Set up the task on the left and press <b>Run Factory</b>.<br>The orchestrator starts free machines, robots deliver every finished part,<br>and progress is tracked here until the target is reached.</p></div>`;
+    return;
+  }
+  const now = run.finished || S.now, elapsed = now - run.created;
+  const partsDone = run.part_status.reduce((a, p) => a + Math.min(p.delivered, p.needed), 0);
+  const partsAll = run.part_status.reduce((a, p) => a + p.needed, 0);
+  const rate = elapsed > 0 && partsDone ? partsDone / elapsed : 0;
+  const eta = run.status === "completed" ? "Done" : rate ? dur((partsAll - partsDone) / rate) : "—";
+  const uph = elapsed > 0 ? run.units / (elapsed / 3600) : 0;
+  const robotsBusy = S.robots.filter(r => r.status === "busy").length;
+  const runJobs = new Set(S.jobs.filter(j => j.run_id === run.id).map(j => j.id));
+  const runTasks = new Set(S.tasks.filter(t => runJobs.has(t.job_id)).map(t => t.id));
+  const feed = S.events.filter(e => e.run_id === run.id || runJobs.has(e.job_id) || runTasks.has(e.task_id)).slice(0, 7);
+  const pending = S.jobs.filter(j => j.run_id === run.id && j.status === "awaiting_confirmation");
+  $("#run-panel").innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">
+      <div style="min-width:0"><div class="task-label">Task · <span class="mono" style="font-size:13px">${esc(run.id)}</span></div><div class="task-name">${esc(run.name)}</div></div>
+      <span class="pill-lg ${esc(run.status)}">${esc(RUN_LABEL[run.status] || run.status)}</span></div>
+    ${run.reason ? `<div class="result bad">${esc(run.reason)}</div>` : ""}
+    ${pending.map(j => `<div class="notice" style="margin:14px 0 0"><span class="badge s-orange">Approval required</span><div class="txt"><span class="id">${esc(j.id)}</span> ${esc(j.machine_id)} → <span class="mono">${esc(j.file)}</span></div>
+      <button class="btn sm go" data-action="approve-job" data-id="${esc(j.id)}">Review &amp; Start</button></div>`).join("")}
+    <div class="hr"></div>
+    <div class="prog-head"><span>Progress</span><b>${Math.round(run.progress_pct)}%</b></div>
+    <div class="bar"><i style="width:${run.progress_pct}%"></i></div>
+    <div class="hr"></div>
+    <div class="bigstats"><div class="ico">${COG}</div>
+      <div><div class="lbl">Units Produced</div><div class="val">${run.units}<small>${run.units === 1 ? "unit" : "units"}</small></div></div>
+      <div class="sep"><div class="lbl">Target</div><div class="val">${run.target}<small>${run.target === 1 ? "unit" : "units"}</small></div></div></div>
+    <div class="hr"></div>
+    <div class="mini-stats">
+      <div><span>Elapsed</span><b>${dur(elapsed)}</b></div>
+      <div><span>Throughput</span><b>${uph >= 10 ? Math.round(uph) : uph.toFixed(1)} /h</b></div>
+      <div><span>Time remaining</span><b>${eta}</b></div>
+      <div><span>Robots working</span><b>${robotsBusy} / ${S.robots.filter(r => ONLINE.has(r.status)).length}</b></div></div>
+    <div class="mt" style="margin-top:18px">${table(["Part", "Per unit", "Delivered", "In production", ""], run.part_status.map(p => `<tr>
+      <td><span class="mono">${esc(fileLabel(p.file))}</span></td><td>${p.per_unit}</td><td>${p.delivered} / ${p.needed}</td><td>${p.in_production}</td>
+      <td style="width:30%"><div class="part-bar"><i style="width:${100 * Math.min(1, p.delivered / p.needed)}%"></i></div></td></tr>`), "")}</div>
+    <div style="margin-top:18px"><div class="muted" style="font-size:12px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Live activity</div>
+      <div class="feed">${feed.length ? feed.map(e => `<div><time>${fmtTime(e.ts)}</time><span>${esc(e.text)}</span></div>`).join("") : '<span class="faint">Waiting for the first job…</span>'}</div></div>
+    ${run.failures ? `<div class="muted" style="margin-top:12px;font-size:12px">${run.failures} failed job(s) were retried automatically.</div>` : ""}`;
+}
+
+async function startRun() {
+  const f = $("#setup-form"), btn = $("#run-btn");
+  const parts = {};
+  document.querySelectorAll("[data-part]").forEach(cb => { if (cb.checked) parts[cb.dataset.part] = Number(document.querySelector(`[data-qty="${CSS.escape(cb.dataset.part)}"]`).value) || 1; });
+  const body = {name: f.elements.name.value.trim(), target: Number(f.elements.target.value), deliver_to: f.deliver_to.value,
+                document_id: setup.docId || null, parts, approve_each_job: f.approve.checked};
+  if (!body.name) { toast("Enter the product or task name", "bad"); f.elements.name.focus(); return; }
+  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Planning production…`;
+  try {
+    const run = await api("/api/runs", {body});
+    toast(`${run.id} started: ${run.target} × ${run.name}`, "ok");
+    sig = {}; await refresh();
+  } catch (e) { toast(e.message, "bad"); btn.disabled = false; btn.innerHTML = `${PLAY} Run Factory`; }
+}
+async function runAction(id, action) {
+  try { await api(`/api/runs/${encodeURIComponent(id)}/${action}`, {body: {}}); sig = {}; await refresh(); }
+  catch (e) { toast(e.message, "bad"); }
 }
 
 /* ------------------------------------------------------------------ overview */
@@ -691,10 +936,10 @@ function renderDocuments() {
 }
 
 /* ------------------------------------------------------------------ activity */
-const EV_KINDS = {all:"All", request:"Requests", job:"Jobs", dispatch:"Dispatch", task:"Tasks", robot:"Robots", config:"Configuration", model:"Orchestrator", checker:"Validation", error:"Errors"};
+const EV_KINDS = {all:"All", run:"Production", request:"Requests", job:"Jobs", dispatch:"Dispatch", task:"Tasks", robot:"Robots", config:"Configuration", model:"Orchestrator", checker:"Validation", error:"Errors"};
 function renderActivity() {
   $("#ev-filters").innerHTML = Object.entries(EV_KINDS).map(([k, l]) => `<button class="${evFilter === k ? "on" : ""}" data-action="ev-filter" data-id="${k}">${l}</button>`).join("");
-  const KC = {request:"purple", job:"blue", dispatch:"cyan", task:"green", robot:"grey", config:"yellow", model:"orange", checker:"orange", error:"red"};
+  const KC = {run:"purple", request:"purple", job:"blue", dispatch:"cyan", task:"green", robot:"grey", config:"yellow", model:"orange", checker:"orange", error:"red"};
   const ev = S.events.filter(e => evFilter === "all" || e.kind === evFilter);
   $("#events-table").innerHTML = table(["Time", "Category", "Event"], ev.map(e => `<tr><td class="muted mono">${fmtTime(e.ts)}</td>
     <td><span class="badge s-${KC[e.kind] || "grey"}">${esc(EV_KINDS[e.kind] || e.kind)}</span></td><td class="wrap">${esc(e.text)}</td></tr>`), "No events.");
@@ -849,8 +1094,13 @@ document.addEventListener("click", e => {
     case "add-zone": return dlgAddZone();
     case "remove-doc": return dlgConfirm(`Delete ${id}`, `Delete document <b>${esc(id)}</b>? Work orders that reference it will no longer be able to open it.`, "Delete", () => api(`/api/documents/${encodeURIComponent(id)}`, {method: "DELETE"}));
     case "ev-filter": evFilter = id; return renderActivity();
+    case "setup-clear-doc": setup.docId = null; saveSetup(); return renderProduction();
+    case "run-pause": return runAction(id, "pause");
+    case "run-resume": return runAction(id, "resume");
+    case "run-stop": return dlgConfirm(`Stop ${id}`, `Stop production run <b>${esc(id)}</b>? Machines already running finish their current part and robots still deliver it; no new jobs are started.`, "Stop Run", () => api(`/api/runs/${encodeURIComponent(id)}/stop`, {body: {}}).then(() => { sig = {}; }));
   }
 });
+$("#setup-form").addEventListener("submit", e => { e.preventDefault(); startRun(); });
 $("#order-form").addEventListener("submit", e => { e.preventDefault(); submitOrder(e.target, $("#order-result")); });
 const drop = $("#doc-drop"), docFile = $("#doc-file");
 docFile.onchange = async () => { if (docFile.files[0]) { try { await uploadDoc(docFile.files[0]); refresh(); } catch (e) { toast(e.message, "bad"); } docFile.value = ""; } };
@@ -859,7 +1109,7 @@ drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", async e => { e.preventDefault(); drop.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) { try { await uploadDoc(f); refresh(); } catch (err) { toast(err.message, "bad"); } } });
 
 setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString(); }, 1000);
-setTab(tab in {overview:1, orders:1, fleet:1, machines:1, documents:1, activity:1} ? tab : "overview");
+setTab(tab in {production:1, overview:1, orders:1, fleet:1, machines:1, documents:1, activity:1} ? tab : "production");
 refresh().then(() => { if (tab === "orders") buildOrderForm(); });
 setInterval(refresh, 2000);
 </script>

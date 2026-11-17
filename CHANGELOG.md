@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
+### Added
+
+- Production runs: make N units of a product autonomously. Set the parts per unit (or let the model choose them),
+  the process PDF and the target. Free machines are kept busy, robots deliver every part, and the run completes at
+  the target. Three failed jobs in a row pause it. API: `POST /api/runs`, `POST /api/runs/<id>/pause|resume|stop`.
+- Dashboard **Production** tab (the new landing page): setup with process PDF, robots, machines, product and target,
+  plus Run Factory; live progress, units against target, throughput, time remaining, per-part counts, activity feed.
+  The header shows Factory Running, Paused or Idle.
+
+### Changed
+
+- The dashboard is renamed "Autonomous Factory", with a purple accent.
+
 ## [0.3.0] - 2026-11-17
 
 ### Added

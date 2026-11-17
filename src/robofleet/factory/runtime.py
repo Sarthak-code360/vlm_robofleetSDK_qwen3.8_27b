@@ -33,6 +33,9 @@ CONNECTIONS = {"simulated", "agent"}
 MACHINE_TYPES = {"3d_printer"}
 PRIORITIES = {"normal", "urgent"}
 ACTIVE_JOB = {"awaiting_confirmation", "starting", "running"}
+HOLDING_JOB = ACTIVE_JOB | {"done"}  # "done" = the part is still on the machine, waiting for a robot
+RUN_ACTIVE = {"running", "paused"}
+MAX_CONSECUTIVE_FAILURES = 3
 NONE = "none"
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
 NAME_RE = re.compile(r"^[\w .,()/+#-]{1,60}$")
@@ -83,12 +86,14 @@ class Factory:
         self.sim_speed_m_s, self.sim_handling_s = 1.0, 2.0  # built-in simulated robots
         self.jobs: dict[str, dict] = {}
         self.tasks: dict[str, dict] = {}
+        self.runs: dict[str, dict] = {}
         self.outbox: dict[str, list[dict]] = {}
         self._last_message: dict[str, tuple] = {}
         self.events: list[dict] = []
         self.lock = threading.RLock()
         self._counter = 0
         self._dispatching = threading.Lock()
+        self._run_stepping = threading.Lock()
         if self.data_dir:
             self._load_registry()
 
@@ -250,11 +255,8 @@ class Factory:
                 return {"ok": False, "summary": f"rejected: {machine['id']} is {machine['state']}", "choice": choice}
             if any(j["machine_id"] == machine["id"] and j["status"] in ACTIVE_JOB for j in self.jobs.values()):
                 return {"ok": False, "summary": f"rejected: {machine['id']} already has a job", "choice": choice}
-            job = {"id": self._next_id("JOB"), "request": text, "machine_id": machine["id"], "file": choice["file"],
-                   "deliver_to": to_zone, "reason": reason, "created": time.time(), "task_id": None,
-                   "document": document, "priority": priority,
-                   "status": "awaiting_confirmation" if self.require_confirmation else "starting"}
-            self.jobs[job["id"]] = job
+            job = self._new_job(text, machine["id"], choice["file"], to_zone, reason, document, priority,
+                                self.require_confirmation)
             return {"ok": True, "summary": f"{job['id']}: {machine['id']} will run {job['file']}, then deliver to {to_zone}",
                     "job": dict(job), "choice": choice}
         if action == "move_item":
@@ -265,6 +267,16 @@ class Factory:
                                   document=document, priority=priority)
             return {"ok": True, "summary": f"{task['id']}: move item {src} -> {dst}", "task": dict(task), "choice": choice}
         return {"ok": False, "summary": f"nothing to do ({reason or 'no matching machine or zone'})", "choice": choice}
+
+    def _new_job(self, request: str, machine_id: str, file: str, deliver_to: str, reason: str = "",
+                 document: dict | None = None, priority: str = "normal", needs_approval: bool = True,
+                 run_id: str | None = None) -> dict:
+        job = {"id": self._next_id("JOB"), "request": request, "machine_id": machine_id, "file": file,
+               "deliver_to": deliver_to, "reason": reason, "created": time.time(), "task_id": None,
+               "document": document, "priority": priority, "run_id": run_id,
+               "status": "awaiting_confirmation" if needs_approval else "starting"}
+        self.jobs[job["id"]] = job
+        return job
 
     def confirm_job(self, job_id: str) -> dict:
         """A person confirmed the machine is safe to start (e.g. the print bed is clear)."""
@@ -297,7 +309,7 @@ class Factory:
             machine.start(job["file"])
         except Exception as e:  # upload/connection errors from real machines
             with self.lock:
-                job.update(status="failed", error=str(e))
+                job.update(status="failed", error=str(e), finished=time.time())
                 self._event("job", f"{job_id} could not start on {machine.id}: {e}", job_id=job_id)
             return
         with self.lock:
@@ -337,6 +349,7 @@ class Factory:
                 else:
                     job.update(status="failed", finished=time.time())
                     self._event("job", f"{job['id']} FAILED on {job['machine_id']}", job_id=job["id"])
+        self._run_step()
         self.dispatch()
 
     def _new_task(self, from_zone: str, to_zone: str, instruction: str, job_id: str | None = None,
@@ -404,6 +417,209 @@ class Factory:
             except Exception as e:  # keep the factory running; the error is visible in the event log
                 self._event("error", f"tick failed: {e!r}")
             stop.wait(interval_s)
+
+    # ------------------------------------------------------------------ production runs
+
+    def start_run(self, spec: dict) -> dict:
+        """Starts a production run: make ``target`` units, each needing ``parts`` ({job file: quantity}).
+
+        The factory keeps every free machine busy with the parts still needed, robots deliver each finished part,
+        and the run completes when enough parts for ``target`` units are delivered.
+
+        spec: name, target, parts ({file: qty}; empty = the model picks from name/description), description,
+              document_id (process PDF for the robots), deliver_to, approve_each_job (a person approves every
+              machine start; default: only when a real machine is involved).
+        """
+        name = str(spec.get("name") or "").strip()
+        if not NAME_RE.match(name):
+            raise ValueError("product name: 1-60 letters, digits, spaces or .,()/+#-")
+        try:
+            target = int(spec.get("target") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("target must be a whole number") from None
+        if not 1 <= target <= 100_000:
+            raise ValueError("target must be between 1 and 100000")
+        deliver_to = spec.get("deliver_to") or self.default_output_zone
+        self._check_zone(deliver_to)
+        document = None
+        if spec.get("document_id"):
+            if spec["document_id"] not in self.documents:
+                raise KeyError(spec["document_id"])
+            document = {k: self.documents[spec["document_id"]][k] for k in ("id", "name")}
+
+        with self.lock:
+            files_by_machine = {m.id: set(m.list_files()) for m in self.machines.values()}
+        available = set().union(*files_by_machine.values()) if files_by_machine else set()
+        parts = spec.get("parts") or {}
+        if not isinstance(parts, dict):
+            raise ValueError("parts must be an object {job file: quantity per unit}")
+        if not parts:
+            text = " ".join(str(spec.get(k) or "") for k in ("name", "description")).strip()
+            parts = self._plan_parts(text, sorted(available), document)
+        clean = {}
+        for file, qty in parts.items():
+            if file not in available:
+                raise ValueError(f"no machine can make {file!r}")
+            try:
+                qty = int(qty)
+            except (TypeError, ValueError):
+                raise ValueError(f"quantity for {file} must be a whole number") from None
+            if not 1 <= qty <= 100:
+                raise ValueError(f"quantity for {file} must be between 1 and 100")
+            clean[file] = qty
+        if not clean:
+            raise ValueError("choose at least one part")
+        machines_used = sorted(mid for mid, files in files_by_machine.items() if files & set(clean))
+        real = any(type(self.machines[mid]).__name__ != "SimulatedPrinter" for mid in machines_used)
+        approve = bool(spec["approve_each_job"]) if "approve_each_job" in spec else real
+
+        with self.lock:
+            if any(r["status"] in RUN_ACTIVE for r in self.runs.values()):
+                raise ValueError("a production run is already active; stop it first")
+            run = {"id": self._next_id("RUN"), "name": name, "description": str(spec.get("description") or "")[:500],
+                   "target": target, "parts": clean, "document": document, "deliver_to": deliver_to,
+                   "approve_each_job": approve, "machines": machines_used, "status": "running",
+                   "created": time.time(), "finished": None, "reason": ""}
+            self.runs[run["id"]] = run
+            self._event("run", f"Production run {run['id']} started: {target} × {name} "
+                               f"({', '.join(f'{q}× {f}' for f, q in clean.items())} per unit)", run_id=run["id"])
+        self.tick_soon()
+        return self.run_view(run)
+
+    def _plan_parts(self, text: str, files: list[str], document: dict | None) -> dict:
+        """The model picks which job files make one unit of the product; keyword matching as fallback."""
+        if not files:
+            raise ValueError("no machine has job files")
+        if self.model is not None and text:
+            schema = {"type": "object", "additionalProperties": False, "required": ["parts"],
+                      "properties": {"parts": {"type": "array", "items": {
+                          "type": "object", "additionalProperties": False, "required": ["file", "quantity"],
+                          "properties": {"file": {"type": "string", "enum": files},
+                                         "quantity": {"type": "integer", "minimum": 1, "maximum": 20}}}}}}
+            messages = [
+                {"role": "system", "content": "You plan production in an autonomous factory. Choose which job files "
+                 "(and how many of each) are needed to make ONE unit of the product. Use only the listed files. JSON only."},
+                {"role": "user", "content": f"Product: {text}\nJob files: {json.dumps(files)}"
+                 + (f"\nProcess document: {document['name']}" if document else "")}]
+            try:
+                answer, _ = self.model.chat_json(messages, schema, "production_parts", timeout=300)
+                parts = {}
+                for p in answer.get("parts", []):
+                    if p.get("file") in files:
+                        parts[p["file"]] = parts.get(p["file"], 0) + int(p.get("quantity") or 1)
+                if parts:
+                    return parts
+            except (ModelError, TypeError, ValueError) as e:
+                self._event("model", f"Model could not plan the parts, using keyword matching: {e}")
+        words = set(re.findall(r"[a-z0-9]+", text.lower()))
+        parts = {}
+        for f in files:
+            stem = set(re.findall(r"[a-z0-9]+", f.lower().replace(".gcode.3mf", ""))) - {"gcode", "3mf"}
+            if stem and stem & words - {"the", "a", "an", "and", "of"} and (stem <= words or len(stem & words) >= 2):
+                parts[f] = 1
+        if not parts:
+            raise ValueError("could not tell which parts make this product; select them")
+        return parts
+
+    def set_run_status(self, run_id: str, action: str) -> dict:
+        """pause, resume or stop a run. Jobs already on machines finish and are delivered."""
+        with self.lock:
+            run = self.runs.get(run_id)
+            if run is None:
+                raise KeyError(run_id)
+            allowed = {"pause": ({"running"}, "paused"), "resume": ({"paused"}, "running"),
+                       "stop": (RUN_ACTIVE, "stopped")}
+            if action not in allowed:
+                raise ValueError("action must be pause, resume or stop")
+            sources, new = allowed[action]
+            if run["status"] not in sources:
+                raise ValueError(f"{run_id} is {run['status']}")
+            run["status"], run["reason"] = new, ""
+            if new == "stopped":
+                run["finished"] = time.time()
+                for job in self.jobs.values():  # jobs nobody approved yet will not start
+                    if job.get("run_id") == run_id and job["status"] == "awaiting_confirmation":
+                        job["status"] = "cancelled"
+            self._event("run", f"Production run {run_id} {new}", run_id=run_id)
+            return self.run_view(run)
+
+    def run_view(self, run: dict) -> dict:
+        """A run with its live counts: parts delivered, in production, units produced, progress."""
+        jobs = [j for j in self.jobs.values() if j.get("run_id") == run["id"]]
+        delivered = {f: 0 for f in run["parts"]}
+        in_flight = {f: 0 for f in run["parts"]}
+        for j in jobs:
+            if j["status"] == "delivered":
+                delivered[j["file"]] += 1
+            elif j["status"] in HOLDING_JOB:
+                in_flight[j["file"]] += 1
+        units = min(delivered[f] // q for f, q in run["parts"].items())
+        needed = {f: run["target"] * q for f, q in run["parts"].items()}
+        parts_done = sum(min(delivered[f], needed[f]) for f in needed)
+        return dict(run, units=min(units, run["target"]), progress_pct=round(100 * parts_done / sum(needed.values()), 1),
+                    part_status=[{"file": f, "per_unit": run["parts"][f], "delivered": delivered[f],
+                                  "in_production": in_flight[f], "needed": needed[f]} for f in run["parts"]],
+                    jobs_total=len(jobs), failures=sum(j["status"] in {"failed", "delivery_failed"} for j in jobs))
+
+    def tick_soon(self) -> None:
+        """Starts the first jobs of a run without waiting for the next control-loop tick."""
+        threading.Thread(target=self._run_step, daemon=True).start()
+
+    def _run_step(self) -> None:
+        """Keeps free machines busy with the parts the active run still needs."""
+        if not self._run_stepping.acquire(blocking=False):
+            return
+        try:
+            self._run_step_locked()
+        finally:
+            self._run_stepping.release()
+
+    def _run_step_locked(self) -> None:
+        with self.lock:
+            run = next((r for r in self.runs.values() if r["status"] == "running"), None)
+            if run is None:
+                return
+            view = self.run_view(run)
+            if view["units"] >= run["target"]:
+                run.update(status="completed", finished=time.time())
+                self._event("run", f"Production run {run['id']} completed: {run['target']} × {run['name']}", run_id=run["id"])
+                return
+            finished = sorted((j for j in self.jobs.values() if j.get("run_id") == run["id"] and j.get("finished")),
+                              key=lambda j: j["finished"])
+            streak = 0
+            for j in reversed(finished):
+                if j["status"] not in {"failed", "delivery_failed"}:
+                    break
+                streak += 1
+            if streak >= MAX_CONSECUTIVE_FAILURES:
+                run.update(status="paused", reason=f"{streak} jobs in a row failed; check the machines and robots")
+                self._event("run", f"Production run {run['id']} paused: {run['reason']}", run_id=run["id"])
+                return
+            remaining = {p["file"]: p["needed"] - p["delivered"] - p["in_production"] for p in view["part_status"]}
+            busy = {j["machine_id"] for j in self.jobs.values() if j["status"] in HOLDING_JOB}
+            candidates = [m for mid, m in sorted(self.machines.items()) if mid not in busy and mid in run["machines"]]
+        started = []
+        for machine in candidates:
+            if machine.state() != "idle":
+                continue
+            with self.lock:
+                if run["status"] != "running" or machine.id in {j["machine_id"] for j in self.jobs.values()
+                                                                  if j["status"] in HOLDING_JOB}:
+                    continue
+                files = [f for f in machine.list_files() if remaining.get(f, 0) > 0]
+                if not files:
+                    continue
+                file = max(files, key=lambda f: remaining[f])
+                remaining[file] -= 1
+                job = self._new_job(f"{run['name']} ({run['id']})", machine.id, file, run["deliver_to"],
+                                    f"production run {run['id']}", run["document"], "normal",
+                                    run["approve_each_job"], run_id=run["id"])
+                self._event("job", f"{job['id']} queued for {run['id']}: {machine.id} → {file}"
+                                   + (" (awaiting approval)" if run["approve_each_job"] else ""), job_id=job["id"])
+                if not run["approve_each_job"]:
+                    started.append(job["id"])
+        for job_id in started:
+            self.confirm_job(job_id)
 
     # ------------------------------------------------------------------ registry (dashboard)
 
@@ -739,6 +955,7 @@ class Factory:
                 "options": {"robot_kinds": sorted(ROBOT_KINDS), "connections": sorted(CONNECTIONS),
                             "machine_types": sorted(MACHINE_TYPES), "drivers": sorted(DRIVERS),
                             "priorities": sorted(PRIORITIES)},
+                "runs": [self.run_view(r) for r in sorted(self.runs.values(), key=lambda r: r["created"], reverse=True)],
                 "jobs": sorted(self.jobs.values(), key=lambda j: j["created"], reverse=True),
                 "tasks": sorted(self.tasks.values(), key=lambda t: t["created"], reverse=True),
                 "events": list(reversed(self.events[-100:])),

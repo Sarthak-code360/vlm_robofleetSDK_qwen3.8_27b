@@ -350,12 +350,77 @@ class DashboardRegistryTest(unittest.TestCase):
             urllib.request.urlopen(delete).close()
             self.assertNotIn("RBT-002", factory.robots)
             with urllib.request.urlopen(url + "/") as r:
-                self.assertIn(b"RoboFleet Operations Center", r.read())
+                self.assertIn(b"Autonomous Factory", r.read())
         finally:
             stop.set()
             factory.stop_simulated_robots()
             httpd.shutdown()
             httpd.server_close()
+
+
+class ProductionRunTest(unittest.TestCase):
+    def deliver_all(self, factory, robot="RBT-001"):
+        """Plays the robot: picks up every task it is given and reports it done."""
+        factory.heartbeat(robot, {"zone": "Park", "battery": 90, "status": "idle"})
+        for task in list(factory.tasks.values()):
+            if task["robot_id"] == robot and task["status"] == "in_progress":
+                factory.complete_task(task["id"], robot, ok=True)
+
+    def test_run_makes_target_units_then_completes(self):
+        factory = make_factory(None)
+        factory.heartbeat("RBT-001", {"zone": "Park", "battery": 90, "status": "idle"})
+        run = factory.start_run({"name": "Actuator", "target": 2, "approve_each_job": False,
+                                 "parts": {"actuator_housing.gcode.3mf": 1, "actuator_gear.gcode.3mf": 1}})
+        self.assertEqual((run["status"], run["units"], run["progress_pct"]), ("running", 0, 0))
+        with self.assertRaisesRegex(ValueError, "already active"):
+            factory.start_run({"name": "Other", "target": 1, "parts": {"actuator_gear.gcode.3mf": 1}})
+        for _ in range(100):
+            factory.tick()
+            self.deliver_all(factory)
+            if factory.runs[run["id"]]["status"] == "completed":
+                break
+            time.sleep(0.01)
+        view = factory.run_view(factory.runs[run["id"]])
+        self.assertEqual(view["status"], "completed", factory.events[-5:])
+        self.assertEqual((view["units"], view["progress_pct"]), (2, 100.0))
+        self.assertEqual(view["jobs_total"], 4)  # exactly 2 housings + 2 gears, nothing extra
+        self.assertEqual(sum(1 for j in factory.jobs.values() if j["status"] == "delivered"), 4)
+
+    def test_one_machine_never_holds_two_parts(self):
+        factory = make_factory(None)
+        factory.start_run({"name": "Actuator", "target": 3, "approve_each_job": False,
+                           "parts": {"actuator_housing.gcode.3mf": 1}})
+        for _ in range(5):
+            factory.tick()
+            time.sleep(0.02)
+        # no robot online: the finished part stays on the printer, so no second job may start
+        self.assertEqual(len(factory.jobs), 1)
+
+    def test_approval_mode_and_stop(self):
+        factory = make_factory(None)
+        run = factory.start_run({"name": "Actuator", "target": 5, "approve_each_job": True,
+                                 "parts": {"actuator_gear.gcode.3mf": 1}})
+        factory.tick()
+        job = next(iter(factory.jobs.values()))
+        self.assertEqual((job["status"], job["run_id"]), ("awaiting_confirmation", run["id"]))
+        self.assertEqual(factory.set_run_status(run["id"], "pause")["status"], "paused")
+        self.assertEqual(factory.set_run_status(run["id"], "resume")["status"], "running")
+        self.assertEqual(factory.set_run_status(run["id"], "stop")["status"], "stopped")
+        self.assertEqual(job["status"], "cancelled")
+        with self.assertRaises(ValueError):
+            factory.set_run_status(run["id"], "resume")
+
+    def test_parts_are_planned_from_the_product_name(self):
+        plan = {"parts": [{"file": "actuator_housing.gcode.3mf", "quantity": 1},
+                          {"file": "actuator_gear.gcode.3mf", "quantity": 2}]}
+        factory = make_factory(FakeModel(plan=plan))  # FakeModel answers every non-request question with .plan
+        run = factory.start_run({"name": "Actuator", "target": 10, "description": "full actuator"})
+        self.assertEqual(run["parts"], {"actuator_housing.gcode.3mf": 1, "actuator_gear.gcode.3mf": 2})
+        offline = make_factory(None)
+        run = offline.start_run({"name": "Actuator gear", "target": 1})
+        self.assertEqual(run["parts"], {"actuator_gear.gcode.3mf": 1})
+        with self.assertRaisesRegex(ValueError, "no machine can make"):
+            make_factory(None).start_run({"name": "X", "target": 1, "parts": {"rocket.gcode.3mf": 1}})
 
 
 if __name__ == "__main__":

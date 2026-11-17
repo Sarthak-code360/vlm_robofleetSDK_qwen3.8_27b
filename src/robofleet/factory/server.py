@@ -21,6 +21,11 @@
     DELETE /api/machines/<id>
     POST   /api/zones                        {"name", "x", "y"}
 
+    Production runs (make N units autonomously)
+    POST   /api/runs                         {"name", "target", "parts": {file: qty}, "description",
+                                             "document_id", "deliver_to", "approve_each_job"}
+    POST   /api/runs/<id>/pause|resume|stop
+
     Documents (reference PDFs for work orders)
     POST   /api/documents                    raw PDF body, header X-Filename
     GET    /api/documents/<id>               the PDF
@@ -56,6 +61,8 @@ ROUTES = [
     ("POST", re.compile(r"^/api/machines$"), "add_machine"),
     ("DELETE", re.compile(rf"^/api/machines/{ID}$"), "remove_machine"),
     ("POST", re.compile(r"^/api/zones$"), "add_zone"),
+    ("POST", re.compile(r"^/api/runs$"), "start_run"),
+    ("POST", re.compile(rf"^/api/runs/{ID}/(pause|resume|stop)$"), "run_action"),
     ("POST", re.compile(r"^/api/documents$"), "add_document"),
     ("GET", re.compile(rf"^/api/documents/{ID}$"), "get_document"),
     ("DELETE", re.compile(rf"^/api/documents/{ID}$"), "remove_document"),
@@ -159,6 +166,8 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                     "remove_machine": lambda: factory.remove_machine(arg),
                     "add_zone": lambda: factory.add_zone(body.get("name"), body.get("x"), body.get("y")),
                     "remove_document": lambda: factory.remove_document(arg),
+                    "start_run": lambda: factory.start_run(body),
+                    "run_action": lambda: factory.set_run_status(arg, match.group(2)),
                 }
                 return self._send(200, handlers[name]())
             except KeyError as e:

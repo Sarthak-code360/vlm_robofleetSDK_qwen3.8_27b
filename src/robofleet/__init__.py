@@ -18,7 +18,7 @@ from .rules import rule_based_plan
 from .schema import INSTRUCTIONS, PLAN_SCHEMA
 from .validator import validate_plan
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Coordinator", "Decision", "load_json",

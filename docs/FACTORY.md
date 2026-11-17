@@ -111,12 +111,28 @@ robofleet robot run --id RBT-001 --name "SO-101 arm" --zone "Assembly Table" \
 
 | Tab | What you can do |
 |---|---|
+| Production | The landing page. **Set up once, then Run Factory**: (1) the workflow/process PDF, (2) the robots and (3) machines that are registered, (4) product name, target quantity, parts per unit and delivery zone. The right side tracks the run: progress, units produced against the target, throughput, time remaining, per-part counts and live activity. Pause, resume or stop at any time. |
 | Overview | Gauges for fleet availability, machine utilization (last 60 min), delivery success and fleet energy; machine state timeline (last 15 min); fleet status; task queue; active work order; deliveries per 5 min; live floor map with robots, machines and routes. Jobs awaiting approval show as a banner. |
 | Work Orders | Create a work order: request text, delivery zone (or automatic), priority (normal or urgent), and an optional work instruction PDF. Approve (**Review & Start**, with a safety check) or cancel jobs. See every robot task and its result. |
 | Robot Fleet | Register a robot or a batch: ID, name, type (mobile manipulator, robotic arm, AMR, humanoid), model, home zone, payload, capabilities and connection. Remove robots added in the dashboard. |
 | Machines & Layout | Register machines: a simulated printer (job files, cycle time) or a Bambu Lab printer over LAN (IP, serial, access code, AMS, print files folder). Add zones with x/y positions. |
 | Documents | Upload and manage PDFs (max 25 MB). |
 | Activity Log | Every request, decision, dispatch and robot event, filterable by category. |
+
+**Production runs.** A run makes `target` units of a product, each needing a set of parts (job files and how
+many of each). While the run is active, the factory keeps every free machine busy with the part that is most
+needed. A machine counts as free only after the robot has collected its previous part, so nothing piles up on a
+print bed. Each finished part becomes a robot task with the process PDF attached, and a unit counts as produced
+once all its parts are delivered. The run completes at the target. Three failed jobs in a row pause it.
+If you tick no parts, the model picks them from the product name; without a model, file-name matching is used.
+With real machines, "Operator approves every machine start" is on by default, so a person confirms the bed is
+clear before each print.
+
+```sh
+curl -X POST localhost:8080/api/runs -d '{"name": "Actuator Assembly", "target": 12,
+  "parts": {"actuator_housing.gcode.3mf": 1, "actuator_gear.gcode.3mf": 1, "actuator_cap.gcode.3mf": 1},
+  "document_id": "DOC-001", "approve_each_job": false}'
+```
 
 **Robot connections.** A *digital twin* robot is simulated inside the server, which is good for demos and for
 planning. An *edge agent* is a real robot. Run the agent on or next to it; the dashboard shows the exact command:
@@ -189,6 +205,8 @@ entry in `DRIVERS`. The brain, checker, dispatch and dashboard work with it unch
 | `POST /api/machines` | `{"id", "name", "type", "driver": "simulated"\|"bambu", "zone", ...}` (simulated: `files`, `print_seconds`; bambu: `ip`, `serial`, `access_code`, `use_ams`, `prints_dir`) | the machine (without the access code) |
 | `DELETE /api/machines/<id>` | | the machine |
 | `POST /api/zones` | `{"name", "x", "y"}` | the zone |
+| `POST /api/runs` | `{"name", "target", "parts"?: {file: qty}, "description"?, "document_id"?, "deliver_to"?, "approve_each_job"?}` | the run with live counts |
+| `POST /api/runs/<id>/pause` · `resume` · `stop` | `{}` | the run |
 | `POST /api/documents` | raw PDF body, header `X-Filename` | `{"id", "name", "size", "uploaded"}` |
 | `GET /api/documents/<id>` | | the PDF (`?token=` works too) |
 | `DELETE /api/documents/<id>` | | the document |
