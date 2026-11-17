@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-17
+
+### Added
+
+- Rocket manufacturing demo (`examples/rocket_factory/factory.json`) replaces the actuator demo. 3D printer (Bambu
+  Lab A1), CNC mill, robotic welder and composite layup cell make the parts. Robots bring them to final assembly,
+  then paint, quality inspection and shipping. 11 zones, 10 robots.
+- Machine types beyond 3D printers: `cnc_machine`, `welding_station`, `composite_cell`, `assembly_station`,
+  `paint_booth`, `inspection_station`, run by the new `SimulatedStation` driver. Add them from Settings → Machines.
+- Build order in production runs: a later-stage job (assembly → paint → inspection) starts only once the unit's
+  earlier-stage parts are delivered, and each finished part is routed to the next station's zone.
+- Product catalog (`products` in the factory file): "Sounding Rocket" lists everything one rocket needs. Production
+  setup fills in the parts when you pick a product, and "make 2 rockets" in the chat finds it.
+
+### Changed
+
+- The Overview chat box keeps a fixed height and scrolls.
+- `--simulate-machines` now simulates every machine, not only printers.
+
 ## [0.6.0] - 2026-11-17
 
 ### Added

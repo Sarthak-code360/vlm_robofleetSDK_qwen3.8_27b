@@ -334,7 +334,7 @@ details.more summary:hover{color:var(--text)}
 .sf-working{display:flex;align-items:center;gap:10px;color:#a99ffb;background:rgba(255,255,255,.75);border-radius:12px;padding:10px 14px}
 .live-card{display:flex;flex-direction:column;gap:16px}
 .chat-card{display:flex;flex-direction:column;padding:22px 24px 18px}
-.chat-card .chat-scroll{height:400px;overflow-y:auto;margin:16px -8px 12px;padding:4px 8px}
+.chat-card .chat-scroll{flex:0 0 420px;height:420px;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:16px -8px 12px;padding:4px 8px}
 .chat-card .chat-col{max-width:none;gap:14px}
 .chat-card .welcome{padding:30px 8px 10px}
 .chat-card .welcome p{font-size:14px}
@@ -557,7 +557,9 @@ const LABELS = {
   task:    {pending:["Waiting","yellow"], assigned:["Assigned","purple"], in_progress:["On the way","blue"], done:["Done","green"], failed:["Failed","red"]},
 };
 const KINDS = {mobile_manipulator:"Mobile Manipulator", robotic_arm:"Robotic Arm", amr:"Autonomous Mobile Robot", humanoid:"Humanoid", other:"Other"};
-const MTYPES = {"3d_printer":"3D Printer"};
+const MTYPES = {"3d_printer": "3D Printer", cnc_machine: "CNC Machine", welding_station: "Welding Station", composite_cell: "Composite Cell",
+                assembly_station: "Assembly Station", paint_booth: "Paint Booth", inspection_station: "Inspection Station"};
+const STAGE_LABEL = {1: "Make parts", 2: "Assemble", 3: "Paint", 4: "Inspect"};
 const DRIVERS = {simulated:"Simulated (digital twin)", bambu:"Bambu Lab (LAN)"};
 const DRIVER_CLASS = {SimulatedPrinter:"Digital twin", BambuMachine:"Bambu Lab LAN"};
 const badge = (group, s) => { const [t, c] = LABELS[group][s] || [s, "grey"]; return `<span class="badge s-${c}">${esc(t)}</span>`; };
@@ -618,12 +620,12 @@ function arc(cx, cy, r, a0, a1) {
 const chatState = {pending: null, doc: null, sending: false, lastMain: "", lastCmd: ""};
 const SEND = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
 const CLIP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>`;
-const SUGGESTIONS = [["Print the actuator housing", "A printer starts, a robot delivers it"], ["Make 5 actuators", "Runs a full production"],
+const SUGGESTIONS = [["Print the rocket nose cone", "A printer starts, a robot delivers it"], ["Make 2 rockets", "Runs a full production"],
                      ["How is the factory doing?", "Machines, robots and production"], ["Which robots are free?", "Battery and location"]];
 const richText = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
 function composerHTML(kind) {
-  const ph = "Tell the factory what to make… e.g. print the actuator housing";
+  const ph = "Tell the factory what to make… e.g. print the rocket nose cone";
   return `<div class="composer-box"><div class="att" hidden></div>
     <textarea rows="1" name="text" placeholder="${esc(ph)}"></textarea>
     <div class="composer-row">
@@ -733,7 +735,10 @@ function renderLive() {
   const max = Math.max(1, ...bins);
   const spark = `<svg class="spark" viewBox="0 0 120 40" preserveAspectRatio="none">${bins.map((v, i) =>
     `<rect x="${i * 10 + 1}" y="${40 - Math.max(2, 38 * v / max)}" width="8" height="${Math.max(2, 38 * v / max)}" rx="2" fill="${v ? "#8b80f9" : "#eceef3"}"/>`).join("")}</svg>`;
-  const machineRows = S.machines.slice(0, 4).map(m => {
+  const activity = m => m.state === "busy" ? 0 : S.jobs.some(j => j.machine_id === m.id && j.status === "done") ? 1 : m.state === "idle" ? 3 : 2;
+  const ordered = [...S.machines].sort((x, y) => activity(x) - activity(y));
+  const hidden = ordered.slice(5);
+  const machineRows = ordered.slice(0, 5).map(m => {
     const holding = S.jobs.some(j => j.machine_id === m.id && j.status === "done");
     const job = S.jobs.find(j => j.machine_id === m.id && ["running", "starting"].includes(j.status));
     const [text, col] = m.state === "offline" ? ["Offline", COLORS.grey] : m.state === "error" ? ["Needs attention", COLORS.red]
@@ -752,7 +757,8 @@ function renderLive() {
   $("#live-card").innerHTML = `
     <div class="live-head"><span class="pulse"></span><span class="panel-title">Live</span><span class="muted" style="margin-left:auto;font-size:12.5px">last hour</span></div>
     <div class="live-stat"><div><div class="live-num">${today}</div><div class="muted">part${today === 1 ? "" : "s"} delivered today</div></div>${spark}</div>
-    <div class="live-rows">${machineRows || `<div class="muted">No machines yet. Add one in Settings.</div>`}</div>
+    <div class="live-rows">${machineRows || `<div class="muted">No machines yet. Add one in Settings.</div>`}
+      ${hidden.length ? `<div class="muted" style="font-size:12.5px;padding-left:46px">+ ${hidden.length} more machine${hidden.length === 1 ? "" : "s"}${hidden.every(m => m.state === "idle") ? " ready" : ""}</div>` : ""}</div>
     <div class="live-robots">${robotLine}${waiting ? `<div class="live-chip warn">${waiting} part${waiting === 1 ? "" : "s"} waiting for a robot</div>` : ""}</div>`;
 }
 
@@ -809,30 +815,38 @@ function renderProduction() {
     <div><div class="k">Types</div><div class="v">${esc(Object.entries(types).map(([t, n]) => `${t} (${n})`).join(", ") || "—")}</div>
     <div class="muted" style="font-size:12.5px;margin-top:4px">${S.machines.filter(m => m.state === "busy").length} running · <button type="button" class="link" data-tab="machines">Manage machines</button></div></div>`;
   // 4. product + actions
-  const files = [...new Set(S.machines.flatMap(m => m.files))].sort();
+  const stageOf = f => Math.min(...S.machines.filter(m => m.files.includes(f)).map(m => m.stage || 1));
+  const files = [...new Set(S.machines.flatMap(m => m.files))].sort((a, b) => stageOf(a) - stageOf(b) || a.localeCompare(b));
   const real = S.machines.some(m => m.driver !== "SimulatedPrinter");
   if (changed("product", [locked && run.id, files, Object.keys(S.zones)])) {
     if (locked) {
       $("#setup-product").innerHTML = `<dl class="kv" style="margin:0"><dt>Product</dt><dd>${esc(run.name)}</dd><dt>Target</dt><dd>${run.target} units</dd>
-        <dt>Parts per unit</dt><dd style="white-space:normal">${Object.entries(run.parts).map(([f, q]) => `${q}× <span class="mono">${esc(f)}</span>`).join("<br>")}</dd>
+        <dt>Parts per unit</dt><dd style="white-space:normal">${Object.entries(run.parts).map(([f, q]) => `${q}× ${esc(fileLabel(f))}`).join("<br>")}</dd>
         <dt>Deliver to</dt><dd>${esc(run.deliver_to)}</dd><dt>Machine starts</dt><dd>${run.approve_each_job ? "Approved by an operator" : "Automatic"}</dd></dl>`;
     } else {
       const zones = Object.keys(S.zones), parts = setup.parts || {};
       $("#setup-product").innerHTML = `
         <div class="form-grid">
-          <label class="field full"><span>Product / task name</span><input type="text" name="name" maxlength="60" placeholder="e.g. Actuator Assembly" value="${esc(setup.name || "")}"></label>
+          <label class="field full"><span>Product / task name</span><input type="text" name="name" maxlength="60" list="product-list" placeholder="e.g. Sounding Rocket" value="${esc(setup.name || "")}">
+            <datalist id="product-list">${Object.keys(S.products || {}).map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+            ${Object.keys(S.products || {}).length ? `<small>Pick a product (${esc(Object.keys(S.products).join(", "))}) and its parts fill in.</small>` : ""}</label>
           <label class="field"><span>Target quantity</span><input type="number" name="target" min="1" max="100000" value="${esc(setup.target || 10)}"></label>
           <label class="field"><span>Deliver finished parts to</span><select name="deliver_to">${zones.map(z => `<option ${z === (setup.deliver_to || S.factory.default_output_zone) ? "selected" : ""}>${esc(z)}</option>`).join("")}</select></label>
         </div>
         <div class="field"><span class="muted" style="font-size:12px;font-weight:500">Parts per unit</span>
           <div class="parts">${files.length ? files.map(f => `<label class="part-row"><input type="checkbox" data-part="${esc(f)}" ${parts[f] ? "checked" : ""}>
-            <span class="mono" style="overflow:hidden;text-overflow:ellipsis">${esc(f)}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis">${esc(fileLabel(f))} <span class="faint" style="font-size:11.5px">${esc(MTYPES[(S.machines.find(m => m.files.includes(f)) || {}).type] || "")}</span></span>
             <input type="number" min="1" max="100" data-qty="${esc(f)}" value="${esc(parts[f] || 1)}" title="Quantity per unit"></label>`).join("")
             : `<span class="muted">No job files on any machine yet.</span>`}</div>
           <small class="faint">Leave all unticked to let the orchestrator choose the parts from the product name.</small></div>
         <label class="check"><input type="checkbox" name="approve" ${(setup.approve ?? real) ? "checked" : ""}><span>Operator approves every machine start${real ? " (recommended for real printers)" : ""}</span></label>`;
-      $("#setup-product").oninput = () => {
+      $("#setup-product").oninput = e => {
         const f = $("#setup-form");
+        const prod = e && e.target === f.elements.name && Object.entries(S.products || {}).find(([n]) => n.toLowerCase() === f.elements.name.value.trim().toLowerCase());
+        if (prod) document.querySelectorAll("[data-part]").forEach(cb => {
+          const q = prod[1].parts[cb.dataset.part]; cb.checked = !!q;
+          if (q) document.querySelector(`[data-qty="${CSS.escape(cb.dataset.part)}"]`).value = q;
+        });
         Object.assign(setup, {name: f.elements.name.value, target: Number(f.elements.target.value) || 1, deliver_to: f.deliver_to.value, approve: f.approve.checked, parts: {}});
         document.querySelectorAll("[data-part]").forEach(cb => { if (cb.checked) setup.parts[cb.dataset.part] = Number(document.querySelector(`[data-qty="${CSS.escape(cb.dataset.part)}"]`).value) || 1; });
         saveSetup();
@@ -888,8 +902,8 @@ function renderRunPanel(run) {
       <div><span>Throughput</span><b>${uph >= 10 ? Math.round(uph) : uph.toFixed(1)} /h</b></div>
       <div><span>Time remaining</span><b>${eta}</b></div>
       <div><span>Robots working</span><b>${robotsBusy} / ${S.robots.filter(r => ONLINE.has(r.status)).length}</b></div></div>
-    <div class="mt" style="margin-top:18px">${table(["Part", "Per unit", "Delivered", "In production", ""], run.part_status.map(p => `<tr>
-      <td><span class="mono">${esc(fileLabel(p.file))}</span></td><td>${p.per_unit}</td><td>${p.delivered} / ${p.needed}</td><td>${p.in_production}</td>
+    <div class="mt" style="margin-top:18px">${table(["Step", "Part", "Per unit", "Done", "Working", ""], run.part_status.map(p => `<tr>
+      <td class="muted">${p.stage}. ${esc(STAGE_LABEL[p.stage] || "")}</td><td><b style="font-weight:500;color:var(--strong)">${esc(fileLabel(p.file))}</b></td><td>${p.per_unit}</td><td>${p.delivered} / ${p.needed}</td><td>${p.in_production}</td>
       <td style="width:30%"><div class="part-bar"><i style="width:${100 * Math.min(1, p.delivered / p.needed)}%"></i></div></td></tr>`), "")}</div>
     <div style="margin-top:18px"><div class="muted" style="font-size:12px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Live activity</div>
       <div class="feed">${feed.length ? feed.map(e => `<div><time>${fmtTime(e.ts)}</time><span>${esc(e.text)}</span></div>`).join("") : '<span class="faint">Waiting for the first job…</span>'}</div></div>
@@ -1019,10 +1033,10 @@ function renderMachines() {
   $("#machine-cards").innerHTML = S.machines.length ? S.machines.map(m => `<div class="m-card" data-action="machine-files" data-id="${esc(m.id)}">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div class="m-name">${esc(m.name)}</div>
         <div class="m-meta">${esc(m.zone)} · ${esc(MTYPES[m.type] || m.type)}</div></div>${badge("machine", m.state)}</div>
-      <div class="m-job">${m.job && m.state === "busy" ? `Making <b>${esc(fileLabel(m.job))}</b>` : `<span class="muted">${m.files.length} part file${m.files.length === 1 ? "" : "s"} ready</span>`}</div>
+      <div class="m-job">${m.job && m.state === "busy" ? `Making <b>${esc(fileLabel(m.job))}</b>` : `<span class="muted">${m.files.length} ${m.type === "3d_printer" ? "print file" : "job"}${m.files.length === 1 ? "" : "s"} ready</span>`}</div>
       ${m.progress_pct != null && m.state === "busy" ? `<div class="progress" style="height:8px;border-radius:4px"><i style="width:${m.progress_pct}%"></i></div>` : ""}
       ${m.error ? `<div class="alert-line">${esc(m.error)}</div>` : ""}
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px"><span class="m-open">Print files →</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px"><span class="m-open">${m.type === "3d_printer" ? "Print files →" : "Jobs →"}</span>
         ${m.source !== "file" ? `<button class="btn sm ghost danger" data-action="remove-machine" data-id="${esc(m.id)}">Remove</button>` : ""}</div></div>`).join("")
     : `<div class="empty">No machines yet. Press + Add machine.</div>`;
 }
@@ -1160,16 +1174,16 @@ function dlgAddMachine() {
     <div class="form-grid">
       <label class="field"><span>Name</span><input type="text" name="name" maxlength="60" placeholder="e.g. Printer 2" required></label>
       <label class="field"><span>Location</span><select name="zone">${zoneOpts(Object.keys(S.zones).find(z => /print/i.test(z)))}</select></label>
-      <label class="field full"><span>Machine</span><select name="driver"><option value="simulated">Simulated 3D printer, for testing</option><option value="bambu">Bambu Lab 3D printer</option></select></label>
-      <label class="field full" data-drv="simulated"><span>Parts it can make</span><input type="text" name="files" value="actuator_housing.gcode.3mf, actuator_gear.gcode.3mf"></label>
+      <label class="field"><span>Type</span><select name="type">${opts(MTYPES, "3d_printer")}</select></label>
+      <label class="field"><span>Connection</span><select name="driver"><option value="simulated">Simulated, for testing</option><option value="bambu">Bambu Lab printer</option></select></label>
+      <label class="field full" data-drv="simulated"><span>What it can make</span><input type="text" name="files" value="rocket_fin.gcode.3mf"><small>Comma-separated, e.g. rocket_fin.gcode.3mf or engine_mount</small></label>
       <label class="field" data-drv="bambu"><span>IP address</span><input type="text" name="ip" placeholder="192.168.1.50"></label>
       <label class="field" data-drv="bambu"><span>Serial number</span><input type="text" name="serial"></label>
       <label class="field full" data-drv="bambu"><span>Access code</span><input type="password" name="access_code" autocomplete="new-password"><small>On the printer screen. Stored only on this server.</small></label>
     </div>
     <details class="more"><summary>More options</summary><div class="form-grid mt">
       <label class="field"><span>Machine ID</span><input type="text" name="id" maxlength="40" value="${esc(nextId("PRINTER", S.machines.map(m => m.id)))}" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{0,39}" required></label>
-      <label class="field"><span>Type</span><select name="type">${opts(MTYPES)}</select></label>
-      <label class="field" data-drv="simulated"><span>Print time (seconds)</span><input type="number" name="print_seconds" min="1" value="20"></label>
+      <label class="field" data-drv="simulated"><span>Time per job (seconds)</span><input type="number" name="print_seconds" min="1" value="20"></label>
       <label class="field" data-drv="bambu"><span>Print files folder</span><input type="text" name="prints_dir" value="prints"></label>
       <label class="check full" data-drv="bambu"><input type="checkbox" name="use_ams"><span>Use AMS</span></label>
     </div></details>`, foot("Add"), async form => {
@@ -1179,26 +1193,38 @@ function dlgAddMachine() {
       else Object.assign(body, {ip: E.ip.value.trim(), serial: E.serial.value.trim(), access_code: E.access_code.value, prints_dir: E.prints_dir.value.trim(), use_ams: E.use_ams.checked});
       await api("/api/machines", {body}); toast(`Added ${body.name || body.id}`, "ok"); refresh();
     });
-  const f = $("#dlg-form");
-  const sync = () => document.querySelectorAll("#dlg [data-drv]").forEach(el => el.hidden = el.dataset.drv !== f.elements.driver.value);
-  f.elements.driver.onchange = sync; sync();
+  const f = $("#dlg-form"), E = f.elements;
+  const PREFIX = {"3d_printer": "PRINTER", cnc_machine: "CNC", welding_station: "WELD", composite_cell: "COMP", assembly_station: "ASSY", paint_booth: "PAINT", inspection_station: "QA"};
+  const sync = () => {
+    const printer = E.type.value === "3d_printer";
+    E.driver.querySelector('[value=bambu]').disabled = !printer;
+    if (!printer) E.driver.value = "simulated";
+    document.querySelectorAll("#dlg [data-drv]").forEach(el => el.hidden = el.dataset.drv !== E.driver.value);
+  };
+  E.type.onchange = () => {
+    E.id.value = nextId(PREFIX[E.type.value] || "M", S.machines.map(m => m.id));
+    E.files.value = E.type.value === "3d_printer" ? "rocket_fin.gcode.3mf" : "";
+    E.files.placeholder = E.type.value === "3d_printer" ? "" : "e.g. engine_mount, nozzle_insert";
+    sync();
+  };
+  E.driver.onchange = sync; sync();
 }
 async function dlgMachineFiles(id) {
   const m = S.machines.find(x => x.id === id); if (!m) return;
   openDialog(m.name, `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">${badge("machine", m.state)}<span class="muted">${esc(m.zone)} · ${esc(MTYPES[m.type] || m.type)}</span></div>
-    <label class="drop" id="pf-drop"><input type="file" accept=".3mf" id="pf-input" hidden>
+    ${m.type === "3d_printer" ? `<label class="drop" id="pf-drop"><input type="file" accept=".3mf" id="pf-input" hidden>
       <b>Upload a print file</b> from this computer<br><span class="faint">Sliced in Bambu Studio: File → Export → Export plate sliced file (.gcode.3mf)</span>
-      <div class="upload-bar" id="pf-bar" hidden><i></i></div></label>
-    <div class="k-label" style="margin:18px 0 4px">Files on this machine</div>
+      <div class="upload-bar" id="pf-bar" hidden><i></i></div></label>` : ""}
+    <div class="k-label" style="margin:18px 0 4px">${m.type === "3d_printer" ? "Files on this machine" : "Jobs this station can run"}</div>
     <div id="pf-list"><div class="muted">Loading…</div></div>`, `<button class="btn primary" value="cancel">Done</button>`, null);
   const list = async () => {
     try {
       const {files} = await api(`/api/machines/${encodeURIComponent(id)}/files`);
-      $("#pf-list").innerHTML = files.length ? files.map(f => `<div class="file-row"><div class="file-ico">3MF</div>
+      $("#pf-list").innerHTML = files.length ? files.map(f => `<div class="file-row"><div class="file-ico">${m.type === "3d_printer" ? "3MF" : "JOB"}</div>
         <div style="min-width:0"><div class="file-name">${esc(fileLabel(f.name))}</div>
           <div class="file-meta">${esc(f.name)}${f.size ? ` · ${fmtSize(f.size)}` : ""}${f.modified ? ` · ${new Date(f.modified * 1000).toLocaleDateString()}` : ""}</div></div>
-        <div class="file-actions"><button type="button" class="btn sm primary" data-action="print-file" data-id="${esc(id)}" data-file="${esc(f.name)}">Print</button>
+        <div class="file-actions"><button type="button" class="btn sm primary" data-action="print-file" data-id="${esc(id)}" data-file="${esc(f.name)}">${m.type === "3d_printer" ? "Print" : "Run"}</button>
           ${f.deletable ? `<button type="button" class="btn sm ghost danger" data-action="delete-file" data-id="${esc(id)}" data-file="${esc(f.name)}" title="Delete">✕</button>` : ""}</div></div>`).join("")
         : `<div class="muted">No files yet. Upload one above.</div>`;
     } catch (e) { $("#pf-list").innerHTML = `<div class="result bad">${esc(e.message)}</div>`; }
@@ -1222,6 +1248,7 @@ async function dlgMachineFiles(id) {
     xhr.send(file);
   });
   const input = $("#pf-input"), drop = $("#pf-drop");
+  if (!input) return list();
   input.onchange = () => { const f = input.files[0]; input.value = ""; if (f) upload(f); };
   drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
   drop.ondragleave = () => drop.classList.remove("over");
@@ -1231,7 +1258,7 @@ async function dlgMachineFiles(id) {
 async function printFile(id, file) {
   try {
     await api(`/api/machines/${encodeURIComponent(id)}/print`, {body: {file}});
-    toast(`Printing ${fileLabel(file)}. A robot will collect it when it's done.`, "ok");
+    toast(`Started ${fileLabel(file)}. A robot will collect it when it is done.`, "ok");
     refresh();
   } catch (e) { toast(e.message, "bad"); }
 }

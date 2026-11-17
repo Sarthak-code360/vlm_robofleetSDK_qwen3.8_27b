@@ -10,7 +10,7 @@ central brain. People ask for work in plain English. The model starts the right 
 watches the job, and sends the best robot to handle the physical follow-up, such as collecting the finished part.
 
 ```
-"print the actuator housing"
+"print the rocket nose cone"
    -> model picks machine + file -> printer runs -> print done
    -> model picks the robot (distance, battery, workload) -> robot's own AI collects the part
    (every model decision is checked in code; rules take over if the model fails)
@@ -89,31 +89,24 @@ Then connect a model (see [Connect a model](#connect-a-model-qwen38-27b)) and dr
 
 ## Autonomous factory
 
-Run the 3D-printed actuator demo in simulation, with 10 robots and a simulated printer, in three terminals:
+The demo is a **rocket manufacturing factory**. A 3D printer (Bambu Lab A1), CNC mill, robotic welder and
+composite layup cell make the parts. Robots bring them to final assembly, then the paint booth and quality
+inspection, and the finished rocket goes to the shipping dock. Run it all in simulation with one command:
 
 ```sh
-robofleet factory serve --config examples/actuator_factory/factory.json --simulate-machines --offline
-robofleet robot sim --count 10
-robofleet factory request "print the actuator housing" --confirm
+robofleet factory serve --config examples/rocket_factory/factory.json --simulate-machines --simulate-robots --offline
 ```
 
-Open **http://localhost:8080** for the **Autonomous Factory** dashboard. The printer "prints" for 20 s. The nearest
-suitable robot then picks up the part from the Print Bay and brings it to the Output Box:
-
-```
-JOB-0001 started: PRINTER-1 running actuator_housing.gcode.3mf
-JOB-0001 finished on PRINTER-1; created TASK-0002 to collect it
-TASK-0002 -> RBT-004 (rules: Nearest available robot (6 m).)
-RBT-004 picked up TASK-0002: Collect the finished part 'actuator_housing.gcode.3mf' from PRINTER-1 at Print Bay ...
-RBT-004 finished TASK-0002
-```
+Open **http://localhost:8080** for the **Autonomous Factory** dashboard. On **Production**, choose "Sounding Rocket",
+set a target and press **Run Factory**. Or type "print a rocket fin" or "make 2 rockets" in the StarForge AI chat on
+the **Overview**.
 
 The dashboard runs the whole factory without the command line:
 
 - **Production** (opens first): set up once (process PDF, robots, machines, product, target quantity, parts per
   unit) and press **Run Factory**. Machines are kept busy, robots deliver every part, and progress is tracked.
 - **Overview:** robots ready, machines working, battery, the **StarForge AI** chat (the factory's own AI worker:
-  type "print the actuator gear" and a machine starts, then a robot delivers the part), live status and the floor.
+  type "print a rocket fin" and a machine starts, then a robot delivers the part), live status and the floor.
 - **Settings:** add robots and machines with a name and a location. Click a machine to upload a print file from
   your computer and print it. Zones and process documents are here too.
 - **Activity:** every update, and the list of machine jobs and robot tasks.

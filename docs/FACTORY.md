@@ -5,7 +5,7 @@ machine, watches the job, and when the job needs something physical done, such a
 picks the best robot and sends that robot the task. Each robot's own local AI/controller does the physical work.
 
 ```
- user: "print the actuator housing"
+ user: "print the rocket nose cone"
         │
         ▼
  ┌──────────────────────────────┐   checks every decision in code
@@ -29,33 +29,36 @@ the central model, and the central model sends task instructions back. The parts
 | Observation tokens + metadata from robots | robot heartbeats: zone, battery, status (+ any extra fields) |
 | Task instructions to robots | the task in the heartbeat reply (`instruction`, `from_zone`, `to_zone`) |
 | Robot's own VLA model | the command `robofleet robot run --exec` starts per task (e.g. SO-101 `run_fast.sh`) |
-| Description file interface | the factory file (`examples/actuator_factory/factory.json`) |
+| Description file interface | the factory file (`examples/rocket_factory/factory.json`) |
 | Developer APIs | the HTTP API below, and the Python SDK |
 
-## Demo: 3D-printed actuator workflow
+## Demo: rocket manufacturing factory
 
-**What it shows:** a request starts the 3D printer, the factory watches the print, and when it finishes, the nearest
-suitable robot out of 10 is sent to take the part from the Print Bay to the Output Box.
+**What it shows:** a full build of a sounding rocket, run by the factory on its own.
+
+| Stage | Station (zone) | Makes |
+|---|---|---|
+| 1 | Bambu Lab A1 3D printer (Print Bay) | nose cone, 4 fins, avionics bay |
+| 1 | CNC Mill (CNC Machining) | engine mount, nozzle insert |
+| 1 | Robotic Welder (Welding Bay) | fuel tank |
+| 1 | Composite Layup Cell (Composite Shop) | body tube |
+| 2 | Final Assembly Station (Final Assembly) | the assembled rocket, once all its stage-1 parts have arrived |
+| 3 | Paint Booth | paint and livery |
+| 4 | Quality Inspection (Quality Lab) | inspection, then the rocket goes to the Shipping Dock |
+
+Robots carry each finished part to the next station: stage-1 parts go to Final Assembly, and so on. The product is
+defined once in the factory file (`products` → "Sounding Rocket"), so "make 2 rockets" knows everything a rocket
+needs.
 
 ### 1. Try it in simulation (no printer, no robots, no model)
 
-Use three terminals, all in the project folder with the virtual environment active:
-
 ```sh
-# terminal 1: the factory brain, with a simulated printer and rules instead of the model
-robofleet factory serve --config examples/actuator_factory/factory.json --simulate-machines --offline
-
-# terminal 2: ten simulated robots
-robofleet robot sim --count 10
-
-# terminal 3: ask for work
-robofleet factory request "print the actuator housing" --confirm
-robofleet factory status
+robofleet factory serve --config examples/rocket_factory/factory.json --simulate-machines --simulate-robots --offline
 ```
 
-Open **http://localhost:8080** to watch the dashboard. You can also create work orders there and press
-**Review & Start** to approve jobs. Instead of `robofleet robot sim`, you can register digital-twin robots in the
-dashboard (Robot Fleet → Register Robot → Batch).
+Open **http://localhost:8080**. On **Production**, type "Sounding Rocket" as the product (the parts fill in
+automatically), set the target and press **Run Factory**. Or, on the **Overview**, tell StarForge AI "make 2
+rockets" or "print a rocket fin".
 
 ### 2. With Qwen as the brain
 
@@ -63,7 +66,7 @@ Start the model first (see [MODEL_SETUP.md](MODEL_SETUP.md)), then drop `--offli
 
 ```sh
 export VLM_BASE_URL=http://localhost:8000/v1 VLM_MODEL=qwen VLM_THINKING=off
-robofleet factory serve --config examples/actuator_factory/factory.json --simulate-machines
+robofleet factory serve --config examples/rocket_factory/factory.json --simulate-machines
 ```
 
 Qwen now decides which machine and file match the request and which robot collects the part. Every decision is
@@ -76,11 +79,11 @@ Set `"dispatch": "rules"` in the factory file to let only the requests go throug
 ### 3. With the real printer
 
 1. Set up the printer and `config/printer.json` ([PRINTER_SETUP.md](PRINTER_SETUP.md)).
-2. Export sliced files with clear names into `prints/`, e.g. `actuator_housing.gcode.3mf`,
-   `actuator_gear.gcode.3mf`. The model chooses by file name.
+2. Export sliced files with clear names into `prints/`, e.g. `rocket_nose_cone.gcode.3mf`,
+   `rocket_fin.gcode.3mf`. The model chooses by file name.
 3. Run without `--simulate-machines`:
    ```sh
-   robofleet factory serve --config examples/actuator_factory/factory.json
+   robofleet factory serve --config examples/rocket_factory/factory.json
    ```
 4. Request, check the bed is clear, then confirm (`robofleet factory confirm JOB-0001` or **Review & Start** in the dashboard).
 
@@ -94,7 +97,7 @@ each task. The command gets the task's text, so the robot's own model can carry 
 ```sh
 # on the robot's computer, inside the so101-vlm-agent folder
 export ROBOFLEET_SERVER=http://<factory-computer-ip>:8080
-robofleet robot run --id RBT-001 --name "SO-101 arm" --zone "Assembly Table" \
+robofleet robot run --id RBT-001 --name "SO-101 Robotic Arm" --zone "Final Assembly" \
   --exec 'bash real/run_fast.sh {instruction}'
 ```
 
@@ -113,10 +116,10 @@ card on the Overview and type what you need in plain words:
 
 | You type | What happens |
 |---|---|
-| `print the actuator gear` | A free machine that has that file starts right away. When it finishes, the best robot collects the part. |
+| `print a rocket fin` | A free machine that has that file starts right away. When it finishes, the best robot collects the part. |
 | `print the cap on PRINTER-2, RBT-003 delivers it` | Uses that machine and that robot. You can also pick them in the Machine and Robot menus under the message box. |
-| `make 10 actuators` | Starts a production run of 10 units (see Production runs). |
-| `move the box from Raw Material Store to Assembly Table` | A robot task. |
+| `make 2 rockets` | Starts a production run of 10 units (see Production runs). |
+| `move the aluminium sheets from Raw Materials to CNC Machining` | A robot task. |
 | `what's the factory status?` · `which robots are available?` | An answer from the live factory data. |
 
 The paperclip attaches a process PDF to the task, and the robot receives it. Progress of everything started from
@@ -154,7 +157,7 @@ clear before each print.
 
 ```sh
 curl -X POST localhost:8080/api/runs -d '{"name": "Actuator Assembly", "target": 12,
-  "parts": {"actuator_housing.gcode.3mf": 1, "actuator_gear.gcode.3mf": 1, "actuator_cap.gcode.3mf": 1},
+  "parts": {"rocket_nose_cone.gcode.3mf": 1, "rocket_fin.gcode.3mf": 1, "avionics_bay.gcode.3mf": 1},
   "document_id": "DOC-001", "approve_each_job": false}'
 ```
 
@@ -177,22 +180,29 @@ the browser. Robots and machines from the factory file are shown as *factory fil
 
 ```json
 {
-  "name": "Actuator Factory Demo",
-  "type": "3D printed actuator manufacturing factory",
-  "zones": {"Print Bay": {"x": 0, "y": 0}, "Output Box": {"x": 12, "y": 0}, "Charging Dock": {"x": 12, "y": 8}},
-  "chargers": ["Charging Dock"],
-  "default_output_zone": "Output Box",
-  "rules": {"battery_reserve_pct": 20, "charge_threshold_pct": 25, "max_queued_tasks_per_robot": 1, "task_battery_cost": 5},
+  "name": "Rocket Manufacturing Factory",
+  "type": "rocket manufacturing factory (sounding rockets)",
   "assistant_name": "StarForge AI",
+  "zones": {"Print Bay": {"x": 0, "y": 0}, "Final Assembly": {"x": 10, "y": 10}, "Shipping Dock": {"x": 30, "y": 20},
+            "Charging Dock": {"x": 10, "y": 20}},
+  "chargers": ["Charging Dock"],
+  "default_output_zone": "Shipping Dock",
+  "rules": {"battery_reserve_pct": 20, "charge_threshold_pct": 25, "max_queued_tasks_per_robot": 1, "task_battery_cost": 5},
   "require_confirmation": false,
   "dispatch": "model",
   "robot_timeout_s": 15,
+  "products": {
+    "Sounding Rocket": {"parts": {"rocket_nose_cone.gcode.3mf": 1, "rocket_fin.gcode.3mf": 4,
+                                  "rocket_final_assembly": 1}}
+  },
   "machines": [
-    {"id": "PRINTER-1", "type": "3d_printer", "driver": "bambu", "zone": "Print Bay",
+    {"id": "PRINTER-1", "name": "Bambu Lab A1", "type": "3d_printer", "driver": "bambu", "zone": "Print Bay",
      "config": "../../config/printer.json", "prints_dir": "../../prints", "poll_seconds": 10,
-     "print_seconds": 20, "files": ["actuator_housing.gcode.3mf"]}
+     "print_seconds": 20, "files": ["rocket_nose_cone.gcode.3mf", "rocket_fin.gcode.3mf"]},
+    {"id": "ASSY-1", "name": "Final Assembly Station", "type": "assembly_station", "driver": "simulated",
+     "zone": "Final Assembly", "cycle_seconds": 30, "files": ["rocket_final_assembly"]}
   ],
-  "robots": [{"id": "RBT-001", "name": "SO-101 arm", "home_zone": "Assembly Table"}]
+  "robots": [{"id": "RBT-001", "name": "SO-101 Robotic Arm", "home_zone": "Final Assembly"}]
 }
 ```
 
@@ -205,7 +215,9 @@ the browser. Robots and machines from the factory file are shown as *factory fil
 | `robot_wait_alert_s` | Alert when a finished part has waited this long for a robot (default 90). |
 | `dispatch` | `model` (Qwen chooses robots, checked in code) or `rules` (nearest suitable robot, fastest). |
 | `robot_timeout_s` | A robot with no heartbeat for this long goes `offline`, and its task goes back in the queue. |
-| `machines[].driver` | `bambu` (real printer) or `simulated`. `print_seconds` and `files` are only used by `simulated`. |
+| `products` | The catalog: what one unit of each product needs (`parts`: job file → quantity). Used by Production and by "make 2 rockets". |
+| `machines[].type` | `3d_printer`, `cnc_machine`, `welding_station`, `composite_cell` (stage 1), `assembly_station` (2), `paint_booth` (3), `inspection_station` (4). A later stage starts only when the unit's earlier-stage parts are delivered. `stage` overrides it. |
+| `machines[].driver` | `bambu` (real 3D printer) or `simulated` (any type). `files` are the jobs it can do; `print_seconds` / `cycle_seconds` is the simulated time. |
 | `robots` | Known robots. Optional: robots can also join by sending heartbeats. |
 
 To set up a different factory, copy the file, rename the zones and add your machines and robots.
@@ -245,10 +257,10 @@ entry in `DRIVERS`. The brain, checker, dispatch and dashboard work with it unch
 A task sent to a robot looks like this:
 
 ```json
-{"id": "TASK-0002", "type": "pick_and_place", "from_zone": "Print Bay", "to_zone": "Output Box",
- "instruction": "Collect the finished part 'actuator_housing.gcode.3mf' from PRINTER-1 at Print Bay and place it in Output Box. Follow the work instruction 'Housing SOP.pdf'.",
+{"id": "TASK-0002", "type": "pick_and_place", "from_zone": "Print Bay", "to_zone": "Final Assembly",
+ "instruction": "Collect the finished part 'rocket_nose_cone.gcode.3mf' from PRINTER-1 at Print Bay and place it in Final Assembly. Follow the work instruction 'Rocket Assembly Process.pdf'.",
  "job_id": "JOB-0001", "priority": "normal", "battery_cost": 5,
- "document": {"id": "DOC-001", "name": "Housing SOP.pdf", "url": "/api/documents/DOC-001"}}
+ "document": {"id": "DOC-001", "name": "Rocket Assembly Process.pdf", "url": "/api/documents/DOC-001"}}
 ```
 
 Each task is delivered once, in the next heartbeat after it is assigned. A robot that stops sending heartbeats loses
@@ -263,11 +275,11 @@ Task states: `pending` → `assigned` → `in_progress` → `done` (or `failed`)
 from robofleet import ModelClient
 from robofleet.factory import load_factory, serve
 
-factory = load_factory("examples/actuator_factory/factory.json", ModelClient.from_env(), simulate_machines=True,
+factory = load_factory("examples/rocket_factory/factory.json", ModelClient.from_env(), simulate_machines=True,
                        data_dir="data")
 factory.add_robots({"name": "Mobile Manipulator", "home_zone": "Robot Park", "connection": "simulated", "count": 5})
 doc = factory.add_document("Gear SOP.pdf", open("gear_sop.pdf", "rb").read())
-result = factory.submit_request("print the actuator gear", document_id=doc["id"], priority="urgent")
+result = factory.submit_request("print a rocket fin", document_id=doc["id"], priority="urgent")
 factory.confirm_job(result["job"]["id"])
 serve(factory, host="0.0.0.0", port=8080, token="change-me")
 ```

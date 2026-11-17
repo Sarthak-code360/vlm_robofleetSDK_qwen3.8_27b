@@ -3,7 +3,7 @@
     from robofleet import ModelClient
     from robofleet.factory import load_factory, serve
 
-    factory = load_factory("examples/actuator_factory/factory.json", ModelClient.from_env())
+    factory = load_factory("examples/rocket_factory/factory.json", ModelClient.from_env())
     serve(factory, host="0.0.0.0", port=8080)
 """
 

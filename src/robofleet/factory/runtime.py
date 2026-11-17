@@ -1,6 +1,6 @@
 """The factory brain: user requests -> machine jobs -> robot tasks.
 
-    request "print the actuator housing"
+    request "print the rocket nose cone"
       -> model picks machine + file             (interpret, checked in code)
       -> job waits for a person to confirm      (if require_confirmation)
       -> machine runs, progress is watched      (tick)
@@ -26,12 +26,11 @@ from pathlib import Path
 from ..coordinator import Coordinator
 from ..model import ModelClient, ModelError
 from .assistant import DEFAULT_ASSISTANT, AssistantMixin
-from .machines import DRIVERS, Machine, MachineError, build_machine
+from .machines import DRIVERS, MACHINE_TYPES, Machine, MachineError, SimulatedPrinter, SimulatedStation, build_machine, machine_stage
 
 ROBOT_STATUSES = {"idle", "busy", "charging", "fault"}
 ROBOT_KINDS = {"mobile_manipulator", "robotic_arm", "amr", "humanoid", "other"}
 CONNECTIONS = {"simulated", "agent"}
-MACHINE_TYPES = {"3d_printer"}
 PRIORITIES = {"normal", "urgent"}
 ACTIVE_JOB = {"awaiting_confirmation", "starting", "running"}
 HOLDING_JOB = ACTIVE_JOB | {"done"}  # "done" = the part is still on the machine, waiting for a robot
@@ -48,7 +47,7 @@ class Factory(AssistantMixin):
     """Holds the live state of one factory and runs its decisions.
 
     Args:
-        config: Factory description (zones, chargers, rules, machines, robots); see examples/actuator_factory.
+        config: Factory description (zones, chargers, rules, machines, robots); see examples/rocket_factory.
         machines: Machine drivers by id (see ``machines.build_machine``).
         model: The central model. ``None`` = keyword matching for requests and rules for dispatch.
         log_path: Optional JSONL file for every event.
@@ -76,6 +75,8 @@ class Factory(AssistantMixin):
         self.default_output_zone = config.get("default_output_zone")
         self.dispatch_with_model = config.get("dispatch", "model") == "model"
         self.assistant_name = str(config.get("assistant_name") or DEFAULT_ASSISTANT)
+        self.products: dict[str, dict] = {str(k): {"parts": dict(v.get("parts", {})), "description": str(v.get("description", ""))}
+                                          for k, v in (config.get("products") or {}).items()}
         self.chat: list[dict] = []
         self._chat_seq = 0
         self._alerted: dict[str, float] = {}
@@ -89,7 +90,7 @@ class Factory(AssistantMixin):
         self.documents: dict[str, dict] = {}
         self.registry = {"zones": {}, "machines": [], "robots": []}
         self._agents: dict[str, threading.Event] = {}
-        self.sim_speed_m_s, self.sim_handling_s = 1.0, 2.0  # built-in simulated robots
+        self.sim_speed_m_s, self.sim_handling_s, self.sim_interval_s = 1.0, 2.0, 2.0  # built-in simulated robots
         self.jobs: dict[str, dict] = {}
         self.tasks: dict[str, dict] = {}
         self.runs: dict[str, dict] = {}
@@ -181,7 +182,7 @@ class Factory(AssistantMixin):
         """Turns a plain-English request into a machine job or a robot task. Returns what was created.
 
         Args:
-            text: What the person wants, e.g. "print the actuator housing".
+            text: What the person wants, e.g. "print the rocket nose cone".
             document_id: An uploaded reference PDF (work instruction) handed to the robot that does the work.
             deliver_to: Zone for the finished part. ``None`` = the model decides (default output zone).
             priority: ``normal`` or ``urgent``.
@@ -517,7 +518,11 @@ class Factory(AssistantMixin):
             raise ValueError("parts must be an object {job file: quantity per unit}")
         if not parts:
             text = " ".join(str(spec.get(k) or "") for k in ("name", "description")).strip()
-            parts = self._plan_parts(text, sorted(available), document)
+            product = self.match_product(text)
+            if product:
+                name, parts = product, dict(self.products[product]["parts"])
+            else:
+                parts = self._plan_parts(text, sorted(available), document)
         clean = {}
         for file, qty in parts.items():
             if file not in available:
@@ -532,7 +537,19 @@ class Factory(AssistantMixin):
         if not clean:
             raise ValueError("choose at least one part")
         machines_used = sorted(mid for mid, files in files_by_machine.items() if files & set(clean))
-        real = any(type(self.machines[mid]).__name__ != "SimulatedPrinter" for mid in machines_used)
+        real = any(not isinstance(self.machines[mid], (SimulatedPrinter, SimulatedStation)) for mid in machines_used)
+        # build order: each part's stage, and where its finished pieces go (the next stage's station, or deliver_to)
+        stages = {f: min(machine_stage(self.machines[mid]) for mid in machines_used if f in files_by_machine[mid])
+                  for f in clean}
+        route = {}
+        for st in sorted(set(stages.values())):
+            later = sorted(x for x in set(stages.values()) if x > st)
+            if later:
+                nxt = sorted(mid for mid in machines_used
+                             if machine_stage(self.machines[mid]) == later[0] and files_by_machine[mid] & set(clean))
+                route[str(st)] = self.machines[nxt[0]].zone
+            else:
+                route[str(st)] = deliver_to
         approve = bool(spec["approve_each_job"]) if "approve_each_job" in spec else real
 
         with self.lock:
@@ -541,12 +558,26 @@ class Factory(AssistantMixin):
             run = {"id": self._next_id("RUN"), "name": name, "description": str(spec.get("description") or "")[:500],
                    "target": target, "parts": clean, "document": document, "deliver_to": deliver_to,
                    "approve_each_job": approve, "machines": machines_used, "status": "running",
+                   "stages": stages, "route": route,
                    "created": time.time(), "finished": None, "reason": ""}
             self.runs[run["id"]] = run
             self._event("run", f"Production run {run['id']} started: {target} × {name} "
                                f"({', '.join(f'{q}× {f}' for f, q in clean.items())} per unit)", run_id=run["id"])
         self.tick_soon()
         return self.run_view(run)
+
+    def match_product(self, text: str) -> str | None:
+        """The catalog product a request is about ("make 2 rockets" -> "Sounding Rocket"), if exactly one fits."""
+        words = {w.rstrip("s") for w in re.findall(r"[a-z0-9]+", str(text).lower())}
+        full, head = [], []
+        for name in self.products:
+            key = [w.rstrip("s") for w in re.findall(r"[a-z0-9]+", name.lower())]
+            if key and set(key) <= words:
+                full.append(name)
+            elif key and key[-1] in words:
+                head.append(name)
+        matches = full or head
+        return matches[0] if len(matches) == 1 else None
 
     def _plan_parts(self, text: str, files: list[str], document: dict | None) -> dict:
         """The model picks which job files make one unit of the product; keyword matching as fallback."""
@@ -618,9 +649,11 @@ class Factory(AssistantMixin):
         units = min(delivered[f] // q for f, q in run["parts"].items())
         needed = {f: run["target"] * q for f, q in run["parts"].items()}
         parts_done = sum(min(delivered[f], needed[f]) for f in needed)
+        stages = run.get("stages") or {}
+        order = sorted(run["parts"], key=lambda f: (stages.get(f, 1), f))
         return dict(run, units=min(units, run["target"]), progress_pct=round(100 * parts_done / sum(needed.values()), 1),
-                    part_status=[{"file": f, "per_unit": run["parts"][f], "delivered": delivered[f],
-                                  "in_production": in_flight[f], "needed": needed[f]} for f in run["parts"]],
+                    part_status=[{"file": f, "per_unit": run["parts"][f], "delivered": delivered[f], "stage": stages.get(f, 1),
+                                  "in_production": in_flight[f], "needed": needed[f]} for f in order],
                     jobs_total=len(jobs), failures=sum(j["status"] in {"failed", "delivery_failed"} for j in jobs))
 
     def tick_soon(self) -> None:
@@ -657,7 +690,17 @@ class Factory(AssistantMixin):
                 run.update(status="paused", reason=f"{streak} jobs in a row failed; check the machines and robots")
                 self._event("run", f"Production run {run['id']} paused: {run['reason']}", run_id=run["id"])
                 return
-            remaining = {p["file"]: p["needed"] - p["delivered"] - p["in_production"] for p in view["part_status"]}
+            # a later-stage part (assembly, paint, inspection) of unit k starts only when every earlier-stage part
+            # of unit k has been delivered
+            done = {p["file"]: p["delivered"] for p in view["part_status"]}
+            stages = run.get("stages") or {}
+
+            def units_ready(stage: int) -> int:
+                earlier = [done[f] // q for f, q in run["parts"].items() if stages.get(f, 1) < stage]
+                return min(earlier) if earlier else run["target"]
+
+            remaining = {p["file"]: min(p["needed"], units_ready(p["stage"]) * p["per_unit"]) - p["delivered"] - p["in_production"]
+                         for p in view["part_status"]}
             busy = {j["machine_id"] for j in self.jobs.values() if j["status"] in HOLDING_JOB}
             candidates = [m for mid, m in sorted(self.machines.items()) if mid not in busy and mid in run["machines"]]
         started = []
@@ -673,7 +716,8 @@ class Factory(AssistantMixin):
                     continue
                 file = max(files, key=lambda f: remaining[f])
                 remaining[file] -= 1
-                job = self._new_job(f"{run['name']} ({run['id']})", machine.id, file, run["deliver_to"],
+                to_zone = (run.get("route") or {}).get(str(stages.get(file, 1)), run["deliver_to"])
+                job = self._new_job(f"{run['name']} ({run['id']})", machine.id, file, to_zone,
                                     f"production run {run['id']}", run["document"], "normal",
                                     run["approve_each_job"], run_id=run["id"])
                 self._event("job", f"{job['id']} queued for {run['id']}: {machine.id} → {file}"
@@ -823,18 +867,22 @@ class Factory(AssistantMixin):
         entry = {"id": mid, "name": name or mid, "type": mtype, "driver": driver,
                  "zone": self._check_zone(spec.get("zone")),
                  "prints_dir": str(spec.get("prints_dir") or "prints")}
+        if driver == "bambu" and mtype != "3d_printer":
+            raise ValueError("Bambu Lab is a 3D printer connection; use simulated for other machine types")
         if driver == "simulated":
             files = spec.get("files") or []
             if isinstance(files, str):
                 files = [f.strip() for f in re.split(r"[,\n]", files)]
             files = [f for f in files if f]
             if not files or any(len(f) > 100 or "/" in f or "\\" in f for f in files):
-                raise ValueError("list at least one job file name (no folders), e.g. actuator_housing.gcode.3mf")
+                raise ValueError("list at least one job it can do (no folders), e.g. rocket_fin.gcode.3mf or engine_mount")
             try:
                 seconds = float(spec.get("print_seconds") or 20)
             except (TypeError, ValueError):
                 raise ValueError("cycle time must be a number of seconds") from None
             entry.update(files=files[:50], print_seconds=max(1.0, min(seconds, 86_400.0)))
+            if mtype != "3d_printer":
+                entry["cycle_seconds"] = entry["print_seconds"]
         else:
             printer = {k: str(spec.get(k) or "").strip() for k in ("ip", "serial", "access_code")}
             missing = [k for k, v in printer.items() if not v]
@@ -942,7 +990,7 @@ class Factory(AssistantMixin):
         with self.lock:
             if state != "idle" or any(j["machine_id"] == machine_id and j["status"] in HOLDING_JOB for j in self.jobs.values()):
                 raise ValueError(f"{machine.spec.get('name') or machine_id} is busy; try again when it is free")
-            job = self._new_job(f"Print {file}", machine_id, file, self.default_output_zone, "started from Settings",
+            job = self._new_job(f"Make {file}", machine_id, file, self.default_output_zone, "started from Settings",
                                 needs_approval=self.require_confirmation)
             job.update(origin="chat", preferred_robot=robot_id)  # progress shows up in the StarForge conversation
             self._event("request", f"{job['id']}: print {file} on {machine_id} (from Settings)", job_id=job["id"])
@@ -1046,7 +1094,7 @@ class Factory(AssistantMixin):
         stop = threading.Event()
         self._agents[robot_id] = stop
         agent = RobotAgent(_LocalClient(self, robot_id, stop), robot_id, SimulatedExecutor(self.site["zones"], self.sim_speed_m_s, self.sim_handling_s),
-                           zone=zone, battery=battery, verbose=False)
+                           zone=zone, battery=battery, interval_s=self.sim_interval_s, verbose=False)
         threading.Thread(target=agent.run_forever, args=(stop,), daemon=True, name=f"sim-{robot_id}").start()
 
     def simulate_robots(self, seed: int = 1) -> list[str]:
@@ -1080,7 +1128,7 @@ class Factory(AssistantMixin):
         machines = []
         for m in list(self.machines.values()):
             info = m.describe() | {"files": m.list_files()}
-            info.update(name=m.spec.get("name") or m.id, driver=type(m).__name__,
+            info.update(name=m.spec.get("name") or m.id, driver=type(m).__name__, stage=machine_stage(m),
                         source=self.machine_source.get(m.id, "file"))
             machines.append(info)
         with self.lock:
@@ -1101,9 +1149,10 @@ class Factory(AssistantMixin):
                 "machine_history": {k: list(v) for k, v in self.machine_history.items() if k in self.machines},
                 "documents": sorted(self.documents.values(), key=lambda d: d["uploaded"], reverse=True),
                 "options": {"robot_kinds": sorted(ROBOT_KINDS), "connections": sorted(CONNECTIONS),
-                            "machine_types": sorted(MACHINE_TYPES), "drivers": sorted(DRIVERS),
+                            "machine_types": {k: v[0] for k, v in MACHINE_TYPES.items()}, "drivers": sorted(DRIVERS),
                             "priorities": sorted(PRIORITIES)},
                 "chat": list(self.chat[-150:]),
+                "products": self.products,
                 "runs": [self.run_view(r) for r in sorted(self.runs.values(), key=lambda r: r["created"], reverse=True)],
                 "jobs": sorted(self.jobs.values(), key=lambda j: j["created"], reverse=True),
                 "tasks": sorted(self.tasks.values(), key=lambda t: t["created"], reverse=True),

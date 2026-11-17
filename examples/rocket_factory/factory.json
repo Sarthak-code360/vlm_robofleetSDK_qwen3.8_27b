@@ -1,0 +1,240 @@
+{
+  "_comment": "A small rocket factory: parts are printed, machined, welded and laid up, then assembled, painted, inspected and shipped. Machine paths are relative to this file.",
+  "name": "Rocket Manufacturing Factory",
+  "type": "rocket manufacturing factory (sounding rockets)",
+  "assistant_name": "StarForge AI",
+  "zones": {
+    "Print Bay": {
+      "x": 0,
+      "y": 0
+    },
+    "CNC Machining": {
+      "x": 10,
+      "y": 0
+    },
+    "Welding Bay": {
+      "x": 20,
+      "y": 0
+    },
+    "Composite Shop": {
+      "x": 30,
+      "y": 0
+    },
+    "Raw Materials": {
+      "x": 0,
+      "y": 10
+    },
+    "Final Assembly": {
+      "x": 10,
+      "y": 10
+    },
+    "Paint Booth": {
+      "x": 20,
+      "y": 10
+    },
+    "Quality Lab": {
+      "x": 30,
+      "y": 10
+    },
+    "Robot Park": {
+      "x": 0,
+      "y": 20
+    },
+    "Charging Dock": {
+      "x": 10,
+      "y": 20
+    },
+    "Shipping Dock": {
+      "x": 30,
+      "y": 20
+    }
+  },
+  "chargers": [
+    "Charging Dock"
+  ],
+  "default_output_zone": "Shipping Dock",
+  "rules": {
+    "battery_reserve_pct": 20,
+    "charge_threshold_pct": 25,
+    "max_queued_tasks_per_robot": 1,
+    "task_battery_cost": 5
+  },
+  "require_confirmation": false,
+  "dispatch": "model",
+  "robot_timeout_s": 15,
+  "products": {
+    "Sounding Rocket": {
+      "description": "Nose cone, 4 fins, avionics bay, engine mount, nozzle insert, fuel tank, body tube; then final assembly, paint, inspection.",
+      "parts": {
+        "rocket_nose_cone.gcode.3mf": 1,
+        "rocket_fin.gcode.3mf": 4,
+        "avionics_bay.gcode.3mf": 1,
+        "engine_mount": 1,
+        "nozzle_insert": 1,
+        "fuel_tank_weld": 1,
+        "body_tube_layup": 1,
+        "rocket_final_assembly": 1,
+        "rocket_paint_and_livery": 1,
+        "rocket_inspection": 1
+      }
+    }
+  },
+  "machines": [
+    {
+      "id": "PRINTER-1",
+      "name": "Bambu Lab A1",
+      "type": "3d_printer",
+      "driver": "bambu",
+      "zone": "Print Bay",
+      "config": "../../config/printer.json",
+      "prints_dir": "../../prints",
+      "poll_seconds": 10,
+      "print_seconds": 20,
+      "files": [
+        "rocket_nose_cone.gcode.3mf",
+        "rocket_fin.gcode.3mf",
+        "avionics_bay.gcode.3mf"
+      ]
+    },
+    {
+      "id": "CNC-1",
+      "name": "CNC Mill",
+      "type": "cnc_machine",
+      "driver": "simulated",
+      "zone": "CNC Machining",
+      "cycle_seconds": 25,
+      "files": [
+        "engine_mount",
+        "nozzle_insert"
+      ]
+    },
+    {
+      "id": "WELD-1",
+      "name": "Robotic Welder",
+      "type": "welding_station",
+      "driver": "simulated",
+      "zone": "Welding Bay",
+      "cycle_seconds": 30,
+      "files": [
+        "fuel_tank_weld"
+      ]
+    },
+    {
+      "id": "COMP-1",
+      "name": "Composite Layup Cell",
+      "type": "composite_cell",
+      "driver": "simulated",
+      "zone": "Composite Shop",
+      "cycle_seconds": 35,
+      "files": [
+        "body_tube_layup"
+      ]
+    },
+    {
+      "id": "ASSY-1",
+      "name": "Final Assembly Station",
+      "type": "assembly_station",
+      "driver": "simulated",
+      "zone": "Final Assembly",
+      "cycle_seconds": 30,
+      "files": [
+        "rocket_final_assembly"
+      ]
+    },
+    {
+      "id": "PAINT-1",
+      "name": "Paint Booth",
+      "type": "paint_booth",
+      "driver": "simulated",
+      "zone": "Paint Booth",
+      "cycle_seconds": 20,
+      "files": [
+        "rocket_paint_and_livery"
+      ]
+    },
+    {
+      "id": "QA-1",
+      "name": "Quality Inspection",
+      "type": "inspection_station",
+      "driver": "simulated",
+      "zone": "Quality Lab",
+      "cycle_seconds": 15,
+      "files": [
+        "rocket_inspection"
+      ]
+    }
+  ],
+  "robots": [
+    {
+      "id": "RBT-001",
+      "name": "SO-101 Robotic Arm",
+      "kind": "robotic_arm",
+      "model": "SO-101",
+      "home_zone": "Final Assembly",
+      "payload_kg": 0.2
+    },
+    {
+      "id": "RBT-002",
+      "name": "Cargo Rover 02",
+      "kind": "mobile_manipulator",
+      "home_zone": "Robot Park",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-003",
+      "name": "Cargo Rover 03",
+      "kind": "mobile_manipulator",
+      "home_zone": "Robot Park",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-004",
+      "name": "Cargo Rover 04",
+      "kind": "mobile_manipulator",
+      "home_zone": "Robot Park",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-005",
+      "name": "Cargo Rover 05",
+      "kind": "mobile_manipulator",
+      "home_zone": "Raw Materials",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-006",
+      "name": "Cargo Rover 06",
+      "kind": "mobile_manipulator",
+      "home_zone": "Print Bay",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-007",
+      "name": "Cargo Rover 07",
+      "kind": "mobile_manipulator",
+      "home_zone": "CNC Machining",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-008",
+      "name": "Cargo Rover 08",
+      "kind": "mobile_manipulator",
+      "home_zone": "Welding Bay",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-009",
+      "name": "Cargo Rover 09",
+      "kind": "mobile_manipulator",
+      "home_zone": "Composite Shop",
+      "payload_kg": 25
+    },
+    {
+      "id": "RBT-010",
+      "name": "Cargo Rover 10",
+      "kind": "mobile_manipulator",
+      "home_zone": "Shipping Dock",
+      "payload_kg": 25
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 """The factory's AI worker: a chat that turns plain words into factory actions.
 
-    "print the actuator gear"                 -> starts a free machine that has that file
+    "print a rocket fin"                 -> starts a free machine that has that file
     "print the cap on PRINTER-2, RBT-003 delivers" -> that machine, that robot
-    "make 10 actuators"                       -> a production run of 10 units
+    "make 2 rockets"                       -> a production run of 10 units
     "how many robots are online?"             -> an answer from the live factory state
 
 The model (shown to users under the assistant's name, default "StarForge AI") chooses the action and writes the
@@ -137,6 +137,8 @@ class AssistantMixin:
         return {
             "factory": self.config.get("name"), "type": self.site["type"], "zones": list(self.site["zones"]),
             "default_output_zone": self.default_output_zone, "machines": machines, "robots": robots,
+            "products": {k: v["description"] or ", ".join(f"{q}x {f}" for f, q in v["parts"].items())
+                         for k, v in self.products.items()},
             "production_runs": [{k: r[k] for k in ("id", "name", "status", "units", "target", "progress_pct")} for r in active],
             "jobs": {s: sum(j["status"] == s for j in self.jobs.values())
                      for s in ("awaiting_confirmation", "running", "done", "delivered", "failed")},
@@ -174,7 +176,8 @@ class AssistantMixin:
             "- run_machine: make ONE part now. Pick an idle machine (not 'busy' or 'holding part') and one of ITS files. "
             "to_zone = where the part goes (default_output_zone if not said). robot_id only if the user named a robot.\n"
             "- move_item: a robot carries something from from_zone to to_zone.\n"
-            "- start_production: make several units of a product (product = its name, quantity = how many).\n"
+            "- start_production: make one or more complete products (product = a name from 'products' when it fits, "
+            "quantity = how many). A complete product goes through every station in order.\n"
             "- answer: a question, greeting or anything else; answer from the factory data.\n"
             f"Use \"{NONE}\" (or 0 / empty) for fields that do not apply. 'reply' is your short, friendly message to "
             "the user (1-3 sentences): say what you are doing, or the answer. If nothing can do the task, say what is "
@@ -209,6 +212,9 @@ class AssistantMixin:
             if re.search(rf"\b{re.escape(r['id'].lower())}\b", lower):
                 base["robot_id"] = r["id"]
         number = re.search(r"\b(\d{1,5})\b", lower)
+        if words & {"make", "produce", "build", "manufacture"} and self.match_product(text):
+            qty = int(number.group(1)) if number else 1
+            return dict(base, action="start_production", quantity=qty, product=self.match_product(text))
         if number and int(number.group(1)) > 1 and words & {"make", "produce", "build", "manufacture"}:
             return dict(base, action="start_production", quantity=int(number.group(1)),
                         product=re.sub(r"\b(make|produce|build|manufacture|please|units?|of)\b|\d+", " ", lower).strip().title())

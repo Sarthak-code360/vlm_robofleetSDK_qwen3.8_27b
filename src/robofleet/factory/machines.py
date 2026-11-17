@@ -72,17 +72,13 @@ class _PrinterBase(Machine):
         return details
 
 
-class SimulatedPrinter(_PrinterBase):
-    """A printer that 'prints' for ``print_seconds`` (default 20). For demos and tests."""
+class _TimedJob:
+    """A job that takes ``seconds`` to finish. Shared by the simulated machines."""
 
-    def __init__(self, spec: dict, base_dir: Path):
-        super().__init__(spec, base_dir)
-        self.print_seconds = float(spec.get("print_seconds", 20))
+    def _init_timer(self, seconds: float) -> None:
+        self.print_seconds = float(seconds)
         self._started: float | None = None
         self._file: str | None = None
-
-    def list_files(self) -> list[str]:
-        return sorted(set(super().list_files()) | set(self.spec.get("files", [])))
 
     def _progress(self) -> float:
         if self._started is None:
@@ -107,6 +103,45 @@ class SimulatedPrinter(_PrinterBase):
 
     def poll(self) -> str:
         return "done" if self._progress() >= 1 else "running"
+
+
+class SimulatedPrinter(_TimedJob, _PrinterBase):
+    """A printer that 'prints' for ``print_seconds`` (default 20). For demos and tests."""
+
+    def __init__(self, spec: dict, base_dir: Path):
+        super().__init__(spec, base_dir)
+        self._init_timer(spec.get("print_seconds", 20))
+
+    def list_files(self) -> list[str]:
+        return sorted(set(super().list_files()) | set(self.spec.get("files", [])))
+
+
+class SimulatedStation(_TimedJob, Machine):
+    """Any other workstation (CNC, welding, composite layup, assembly, paint, inspection), simulated.
+
+    ``files`` are the jobs/programs it can run, e.g. ``["engine_mount", "nozzle_insert"]``; each takes
+    ``cycle_seconds`` (default 20). A real driver for such a station implements the same Machine interface.
+    """
+
+    def __init__(self, spec: dict, base_dir: Path):
+        super().__init__(spec, base_dir)
+        self.type = spec.get("type", "workstation")
+        self._init_timer(spec.get("cycle_seconds", spec.get("print_seconds", 20)))
+
+    def list_files(self) -> list[str]:
+        return list(self.spec.get("files", []))
+
+
+# Production order: a part made at a later stage needs every earlier-stage part of that unit delivered first.
+MACHINE_TYPES = {
+    "3d_printer": ("3D Printer", 1), "cnc_machine": ("CNC Machine", 1), "welding_station": ("Welding Station", 1),
+    "composite_cell": ("Composite Cell", 1), "assembly_station": ("Assembly Station", 2),
+    "paint_booth": ("Paint Booth", 3), "inspection_station": ("Inspection Station", 4),
+}
+
+
+def machine_stage(machine: Machine) -> int:
+    return int(machine.spec.get("stage") or MACHINE_TYPES.get(machine.type, ("", 1))[1])
 
 
 class BambuMachine(_PrinterBase):
@@ -193,8 +228,12 @@ DRIVERS = {"simulated": SimulatedPrinter, "bambu": BambuMachine}
 
 
 def build_machine(spec: dict, base_dir: Path, simulate: bool = False) -> Machine:
-    """Creates the driver named by ``spec["driver"]``. ``simulate=True`` replaces real printers with simulated ones."""
-    driver = "simulated" if simulate and spec.get("type") == "3d_printer" else spec.get("driver", "simulated")
+    """Creates the driver named by ``spec["driver"]``. ``simulate=True`` replaces real machines with simulated ones."""
+    driver = "simulated" if simulate else spec.get("driver", "simulated")
     if driver not in DRIVERS:
         raise MachineError(f"{spec['id']}: unknown driver {driver!r} (known: {', '.join(DRIVERS)})")
+    if driver == "simulated" and spec.get("type", "3d_printer") != "3d_printer":
+        return SimulatedStation(spec, base_dir)
+    if driver == "bambu" and spec.get("type", "3d_printer") != "3d_printer":
+        raise MachineError(f"{spec['id']}: the bambu driver is for 3D printers")
     return DRIVERS[driver](spec, base_dir)

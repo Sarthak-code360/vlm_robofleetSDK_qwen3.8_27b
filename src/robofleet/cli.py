@@ -1,11 +1,11 @@
 """Command line tool: ``robofleet <command>``.
 
 Autonomous factory:
-  robofleet factory serve --config examples/actuator_factory/factory.json [--simulate-machines] [--simulate-robots]
+  robofleet factory serve --config examples/rocket_factory/factory.json [--simulate-machines] [--simulate-robots]
   robofleet robot sim --count 10                 # 10 simulated robots
   robofleet robot run --id RBT-001 --exec 'bash real/run_fast.sh {instruction}'   # a real robot
   (robots, machines, zones and work instruction PDFs can also be added in the dashboard)
-  robofleet factory request "print the actuator housing"
+  robofleet factory request "print the rocket nose cone"
   robofleet factory confirm JOB-0001
   robofleet factory status
 
@@ -190,7 +190,7 @@ def cmd_factory_serve(args) -> None:
 def cmd_factory_request(args) -> None:
     text = " ".join(args.text)
     if not text:
-        _stop('Say what you need, e.g.  robofleet factory request "print the actuator housing"')
+        _stop('Say what you need, e.g.  robofleet factory request "print the rocket nose cone"')
     print(f"-> asking the factory: {text}")
     result = _client(args).request(text)
     print(f"   {'OK' if result['ok'] else 'NOT DONE'}: {result['summary']}  [{result.get('model', {}).get('latency_s')} s]")
@@ -289,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
         return sp
 
     sp = fsub.add_parser("serve", help="run the factory brain (API + dashboard + control loop)")
-    sp.add_argument("--config", type=Path, required=True, help="factory file, e.g. examples/actuator_factory/factory.json")
+    sp.add_argument("--config", type=Path, required=True, help="factory file, e.g. examples/rocket_factory/factory.json")
     sp.add_argument("--simulate-machines", action="store_true", help="use simulated printers instead of real ones")
     sp.add_argument("--simulate-robots", action="store_true", help="bring every robot in the factory file online as a simulated robot")
     sp.add_argument("--offline", action="store_true", help="no model: keyword matching + rule-based dispatch")

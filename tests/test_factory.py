@@ -11,7 +11,7 @@ from robofleet import ModelError
 from robofleet.factory import (CommandExecutor, Factory, FactoryClient, RobotAgent, SimulatedExecutor,
                                SimulatedPrinter, load_factory, make_server)
 
-EXAMPLE = Path(__file__).parent.parent / "examples/actuator_factory/factory.json"
+EXAMPLE = Path(__file__).parent.parent / "examples/rocket_factory/factory.json"
 
 CONFIG = {
     "name": "Test factory", "type": "test factory",
@@ -166,6 +166,39 @@ class ExampleConfigTest(unittest.TestCase):
         self.assertEqual(len(factory.robots), 10)
         self.assertIsInstance(factory.machines["PRINTER-1"], SimulatedPrinter)
         self.assertTrue(factory.machines["PRINTER-1"].list_files())
+        self.assertEqual(len(factory.machines), 7)
+        self.assertEqual(factory.machines["CNC-1"].type, "cnc_machine")
+        self.assertEqual(factory.match_product("please make 2 rockets"), "Sounding Rocket")
+        self.assertIsNone(factory.match_product("print a fin"))
+
+    def test_rocket_is_built_in_order(self):
+        factory = load_factory(EXAMPLE, simulate_machines=True)
+        for m in factory.machines.values():
+            m.print_seconds = 0
+        factory.sim_speed_m_s, factory.sim_handling_s, factory.sim_interval_s = 1000, 0, 0.02
+        factory.simulate_robots()
+        try:
+            self.assertTrue(wait_for(lambda: sum(r["status"] == "idle" for r in factory.robots.values()) == 10))
+            run = factory.start_run({"name": "Sounding Rocket", "target": 1, "approve_each_job": False})
+            self.assertEqual(run["parts"]["rocket_fin.gcode.3mf"], 4)
+            self.assertEqual(run["route"], {"1": "Final Assembly", "2": "Paint Booth", "3": "Quality Lab", "4": "Shipping Dock"})
+            for _ in range(600):
+                factory.tick()
+                if factory.runs[run["id"]]["status"] == "completed":
+                    break
+                time.sleep(0.02)
+            self.assertEqual(factory.runs[run["id"]]["status"], "completed", factory.events[-5:])
+            jobs = sorted(factory.jobs.values(), key=lambda j: j["created"])
+            assembly = next(j for j in jobs if j["file"] == "rocket_final_assembly")
+            parts = [j for j in jobs if factory.runs[run["id"]]["stages"][j["file"]] == 1]
+            self.assertEqual(len(parts), 10)  # nose cone, 4 fins, avionics bay, engine mount, nozzle, tank, body tube
+            self.assertTrue(all(j["finished"] <= assembly["created"] for j in parts))  # assembly waited for every part
+            self.assertTrue(all(j["deliver_to"] == "Final Assembly" for j in parts))
+            order = [j["file"] for j in jobs[-3:]]
+            self.assertEqual(order, ["rocket_final_assembly", "rocket_paint_and_livery", "rocket_inspection"])
+            self.assertEqual(jobs[-1]["deliver_to"], "Shipping Dock")
+        finally:
+            factory.stop_simulated_robots()
 
 
 class CommandExecutorTest(unittest.TestCase):
@@ -259,7 +292,7 @@ class DashboardRegistryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ip must be"):
             factory.add_machine({"id": "P-9", "zone": "Print Bay", "driver": "bambu",
                                  "ip": "not-an-ip", "serial": "ABC123", "access_code": "1234"})
-        with self.assertRaisesRegex(ValueError, "job file"):
+        with self.assertRaisesRegex(ValueError, "at least one job"):
             factory.add_machine({"id": "P-9", "zone": "Print Bay", "driver": "simulated", "files": "../x"})
         with self.assertRaisesRegex(ValueError, "factory file"):
             factory.remove_robot("RBT-001")
