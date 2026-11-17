@@ -109,7 +109,7 @@ robofleet robot run --id RBT-001 --name "SO-101 arm" --zone "Assembly Table" \
 
 The factory has its own AI worker, **StarForge AI** (the name is set by `assistant_name` in the factory file). It
 runs on the central model (Qwen3.8-27B), but the dashboard only shows the StarForge name. Use the **StarForge AI**
-tab, or the AI Worker panel on the Overview, and type what you need in plain words:
+card on the Overview and type what you need in plain words:
 
 | You type | What happens |
 |---|---|
@@ -138,11 +138,10 @@ under `chat`.
 
 | Tab | What you can do |
 |---|---|
-| Overview | The landing page: robots ready, machines working, robot battery; the StarForge AI chat; what is happening right now; the factory floor. |
-| Production | **Set up once, then Run Factory**: (1) the workflow/process PDF, (2) the robots and (3) machines that are registered, (4) product name, target quantity, parts per unit and delivery zone. The right side tracks the run: progress, units produced against the target, throughput, time remaining, per-part counts and live activity. Pause, resume or stop at any time. |
-| StarForge AI | The full chat with the factory's AI worker. |
-| Setup | Robots, Machines, Zones and Documents. Add robots (one or many, simulated or real) and machines (simulated or Bambu Lab) with just a name and a location; technical fields are under "More options". |
-| Activity | Updates (everything that happened, filterable) and Jobs (machine jobs and robot tasks). Jobs that need approval are approved here or on the Overview. |
+| Production | The page that opens first. **Set up once, then Run Factory**: (1) the workflow/process PDF, (2) the robots and (3) machines that are registered, (4) product name, target quantity, parts per unit and delivery zone. The right side tracks the run: progress, units produced against the target, throughput, time remaining, per-part counts and live activity. Pause, resume or stop at any time. |
+| Overview | Robots ready, machines working, robot battery; the **StarForge AI** chat (type what you need, pick a machine or robot, attach a PDF); the Live card (parts delivered today, each machine's state, robots on the move); the factory floor. |
+| Settings | Robots, Machines, Zones and Documents. Add robots (one or many, simulated or real) and machines (simulated or Bambu Lab) with a name and a location; technical fields are under "More options". **Click a machine** to see its print files, **upload a new file from your computer** (a sliced `.gcode.3mf`), press **Print** on any file, or delete uploaded files. |
+| Activity | Updates (everything that happened, filterable) and Jobs (machine jobs and robot tasks). |
 
 **Production runs.** A run makes `target` units of a product, each needing a set of parts (job files and how
 many of each). While the run is active, the factory keeps every free machine busy with the part that is most
@@ -230,6 +229,10 @@ entry in `DRIVERS`. The brain, checker, dispatch and dashboard work with it unch
 | `DELETE /api/robots/<id>` | | the robot |
 | `POST /api/robots/<id>/heartbeat` | `{"zone", "battery", "status": "idle"\|"busy"\|"charging"\|"fault", ...}` | `{"task": {...} or null, "messages": [...]}` |
 | `POST /api/tasks/<id>/complete` | `{"robot_id", "ok": true, "note": ""}` | the task |
+| `GET /api/machines/<id>/files` | | the machine's print files (name, size, date, deletable) |
+| `POST /api/machines/<id>/files` | raw `.gcode.3mf` body, header `X-Filename` (max 500 MB) | the stored file |
+| `DELETE /api/machines/<id>/files/<name>` | | removes an uploaded file |
+| `POST /api/machines/<id>/print` | `{"file", "robot_id"?}` | the job: prints now, a robot collects the part |
 | `POST /api/machines` | `{"id", "name", "type", "driver": "simulated"\|"bambu", "zone", ...}` (simulated: `files`, `print_seconds`; bambu: `ip`, `serial`, `access_code`, `use_ams`, `prints_dir`) | the machine (without the access code) |
 | `DELETE /api/machines/<id>` | | the machine |
 | `POST /api/zones` | `{"name", "x", "y"}` | the zone |

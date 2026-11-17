@@ -358,6 +358,49 @@ class DashboardRegistryTest(unittest.TestCase):
             httpd.server_close()
 
 
+class MachineFilesTest(unittest.TestCase):
+    def test_upload_list_print_and_delete_over_http(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            machines = [dict(CONFIG["machines"][0], prints_dir=tmp)]
+            factory = make_factory(None, machines=machines, require_confirmation=False)
+            httpd = make_server(factory, "127.0.0.1", 0)
+            url = f"http://127.0.0.1:{httpd.server_address[1]}"
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+            def call(path, data=None, method=None, headers=None):
+                req = urllib.request.Request(url + path, data=data, method=method, headers=headers or {})
+                try:
+                    with urllib.request.urlopen(req) as r:
+                        return r.status, json.load(r)
+                except urllib.error.HTTPError as e:
+                    with e:
+                        return e.code, json.load(e)
+            try:
+                sliced = b"PK\x03\x04" + b"0" * 2000
+                code, body = call("/api/machines/PRINTER-1/files", sliced, "POST", {"X-Filename": "Bracket%20v2.gcode.3mf"})
+                self.assertEqual((code, body["name"], body["size"]), (200, "Bracket v2.gcode.3mf", 2004))
+                self.assertEqual(call("/api/machines/PRINTER-1/files", b"hello", "POST", {"X-Filename": "x.gcode.3mf"})[0], 400)
+                self.assertEqual(call("/api/machines/PRINTER-1/files", sliced, "POST", {"X-Filename": "x.stl"})[0], 400)
+                self.assertFalse(list(Path(tmp).glob(".upload-*")))  # no leftovers from rejected uploads
+
+                files = call("/api/machines/PRINTER-1/files")[1]["files"]
+                self.assertEqual({f["name"]: f["deletable"] for f in files},
+                                 {"Bracket v2.gcode.3mf": True, "actuator_housing.gcode.3mf": False, "actuator_gear.gcode.3mf": False})
+
+                code, job = call("/api/machines/PRINTER-1/print", json.dumps({"file": "Bracket v2.gcode.3mf"}).encode(), "POST",
+                                 {"Content-Type": "application/json"})
+                self.assertEqual((code, job["file"]), (200, "Bracket v2.gcode.3mf"))
+                self.assertTrue(wait_for(lambda: factory.jobs[job["id"]]["status"] == "running"))
+                self.assertEqual(call("/api/machines/PRINTER-1/files/Bracket%20v2.gcode.3mf", method="DELETE")[0], 400)  # printing
+                factory.tick()  # print_seconds=0: done, part waits for a robot
+                factory.jobs[job["id"]]["status"] = "delivered"
+                self.assertEqual(call("/api/machines/PRINTER-1/files/Bracket%20v2.gcode.3mf", method="DELETE")[0], 200)
+                self.assertFalse((Path(tmp) / "Bracket v2.gcode.3mf").exists())
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+
 class SimulateRobotsTest(unittest.TestCase):
     def test_file_robots_come_online(self):
         factory = make_factory(None)

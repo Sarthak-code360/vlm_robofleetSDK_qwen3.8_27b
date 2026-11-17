@@ -19,6 +19,10 @@
     Machines and layout
     POST   /api/machines                     {"id", "name", "type", "driver", "zone", ...driver fields}
     DELETE /api/machines/<id>
+    GET    /api/machines/<id>/files          job files on the machine (name, size, modified, deletable)
+    POST   /api/machines/<id>/files          raw *.gcode.3mf body, header X-Filename: upload from a laptop
+    DELETE /api/machines/<id>/files/<name>   remove an uploaded file
+    POST   /api/machines/<id>/print          {"file", "robot_id"?}: print it now; a robot collects it
     POST   /api/zones                        {"name", "x", "y"}
 
     AI worker chat
@@ -44,12 +48,16 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import tempfile
 import threading
+from pathlib import Path
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from .runtime import MAX_DOCUMENT_BYTES, Factory
+
+MAX_PRINT_FILE_BYTES = 500 * 1024 * 1024
 
 ID = r"([\w.-]+)"
 ROUTES = [
@@ -63,6 +71,10 @@ ROUTES = [
     ("POST", re.compile(rf"^/api/tasks/{ID}/complete$"), "complete"),
     ("POST", re.compile(r"^/api/machines$"), "add_machine"),
     ("DELETE", re.compile(rf"^/api/machines/{ID}$"), "remove_machine"),
+    ("GET", re.compile(rf"^/api/machines/{ID}/files$"), "machine_files"),
+    ("POST", re.compile(rf"^/api/machines/{ID}/files$"), "add_machine_file"),
+    ("DELETE", re.compile(rf"^/api/machines/{ID}/files/([^/]+)$"), "remove_machine_file"),
+    ("POST", re.compile(rf"^/api/machines/{ID}/print$"), "print_file"),
     ("POST", re.compile(r"^/api/zones$"), "add_zone"),
     ("POST", re.compile(r"^/api/chat$"), "chat"),
     ("POST", re.compile(r"^/api/runs$"), "start_run"),
@@ -141,6 +153,8 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                 if name == "add_document":
                     filename = urllib.parse.unquote(self.headers.get("X-Filename", "document.pdf"))
                     return self._send(200, factory.add_document(filename, self._raw(MAX_DOCUMENT_BYTES + 1)))
+                if name == "add_machine_file":
+                    return self._send(200, self._receive_print_file(arg))
                 if name == "get_document":
                     doc = factory.documents.get(arg)
                     if doc is None:
@@ -168,6 +182,9 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                                                               bool(body.get("ok", True)), str(body.get("note", ""))),
                     "add_machine": lambda: factory.add_machine(body),
                     "remove_machine": lambda: factory.remove_machine(arg),
+                    "machine_files": lambda: {"files": factory.machine_files(arg)},
+                    "remove_machine_file": lambda: factory.remove_machine_file(arg, urllib.parse.unquote(match.group(2))),
+                    "print_file": lambda: factory.print_file(arg, str(body.get("file", "")), body.get("robot_id") or None),
                     "add_zone": lambda: factory.add_zone(body.get("name"), body.get("x"), body.get("y")),
                     "remove_document": lambda: factory.remove_document(arg),
                     "chat": lambda: factory.chat_message(body.get("text"), body.get("machine_id") or None,
@@ -180,6 +197,33 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                 return self._send(404, {"error": f"unknown: {e}"})
             except (ValueError, json.JSONDecodeError) as e:
                 return self._send(400, {"error": str(e)})
+
+        def _receive_print_file(self, machine_id: str) -> dict:
+            """Streams a sliced file to disk (it can be large), then hands it to the factory to check and store."""
+            machine = factory.machines.get(machine_id)
+            if machine is None or not hasattr(machine, "prints_dir"):
+                raise KeyError(machine_id)
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0:
+                raise ValueError("empty upload")
+            if length > MAX_PRINT_FILE_BYTES:
+                raise ValueError(f"file is larger than {MAX_PRINT_FILE_BYTES // (1024 * 1024)} MB")
+            folder = machine.prints_dir()
+            folder.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(prefix=".upload-", suffix=".part", dir=folder)
+            try:
+                with open(fd, "wb") as out:
+                    remaining = length
+                    while remaining:
+                        chunk = self.rfile.read(min(remaining, 1 << 20))
+                        if not chunk:
+                            raise ValueError("upload interrupted")
+                        out.write(chunk)
+                        remaining -= len(chunk)
+                filename = urllib.parse.unquote(self.headers.get("X-Filename", ""))
+                return factory.add_machine_file(machine_id, filename, Path(tmp))
+            finally:
+                Path(tmp).unlink(missing_ok=True)
 
         def do_GET(self):
             self._route("GET")

@@ -456,7 +456,7 @@ class Factory(AssistantMixin):
             available = [r for r in self.robots.values() if r["status"] not in {"offline", "fault", "charging"}]
             if not available:
                 self._alert("no-robots", f"No robot is free to collect {len(pending)} finished part(s). "
-                            "Add a robot in Setup → Robots, or connect one.",
+                            "Add a robot in Settings → Robots, or connect one.",
                             repeat_s=120)
                 return
             now = time.time()
@@ -877,6 +877,78 @@ class Factory(AssistantMixin):
             self._save_registry()
             self._event("config", f"Machine {machine_id} removed")
             return {"id": machine.id, "zone": machine.zone}
+
+    # machine job files (upload from a laptop, print) ---------------------------
+
+    def machine_files(self, machine_id: str) -> list[dict]:
+        machine = self.machines.get(machine_id)
+        if machine is None:
+            raise KeyError(machine_id)
+        if not hasattr(machine, "file_details"):
+            return [{"name": f, "size": None, "modified": None, "deletable": False} for f in machine.list_files()]
+        return machine.file_details()
+
+    def add_machine_file(self, machine_id: str, filename: str, upload: Path) -> dict:
+        """Moves an uploaded sliced file (``*.gcode.3mf``) into the machine's prints folder."""
+        machine = self.machines.get(machine_id)
+        if machine is None:
+            raise KeyError(machine_id)
+        if not hasattr(machine, "prints_dir"):
+            raise ValueError(f"{machine_id} does not take print files")
+        name = re.sub(r"[^\w .()+-]", "_", Path(str(filename or "")).name).strip()
+        if not name.lower().endswith(".gcode.3mf"):
+            raise ValueError("upload a sliced Bambu Studio file ending in .gcode.3mf (File → Export plate sliced file)")
+        if len(name) > 120:
+            raise ValueError("file name is too long")
+        with open(upload, "rb") as f:
+            if f.read(4) != b"PK\x03\x04":
+                raise ValueError("this is not a valid .3mf file")
+        folder = machine.prints_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / name
+        with self.lock:
+            if any(j["machine_id"] == machine_id and j["file"] == name and j["status"] in HOLDING_JOB
+                   for j in self.jobs.values()):
+                raise ValueError(f"{name} is being printed right now; upload it under another name")
+            Path(upload).replace(target)
+            self._event("config", f"File {name} uploaded to {machine_id}")
+        return next(d for d in self.machine_files(machine_id) if d["name"] == name)
+
+    def remove_machine_file(self, machine_id: str, name: str) -> dict:
+        machine = self.machines.get(machine_id)
+        if machine is None or not hasattr(machine, "prints_dir"):
+            raise KeyError(machine_id)
+        path = machine.prints_dir() / Path(name).name
+        if not path.is_file():
+            raise ValueError(f"{name} is not an uploaded file of {machine_id}")
+        with self.lock:
+            if any(j["machine_id"] == machine_id and j["file"] == path.name and j["status"] in HOLDING_JOB
+                   for j in self.jobs.values()):
+                raise ValueError(f"{path.name} is being printed right now")
+            path.unlink()
+            self._event("config", f"File {path.name} removed from {machine_id}")
+        return {"name": path.name}
+
+    def print_file(self, machine_id: str, file: str, robot_id: str | None = None) -> dict:
+        """Starts one print of ``file`` on that machine; a robot collects it when done."""
+        machine = self.machines.get(machine_id)
+        if machine is None:
+            raise KeyError(machine_id)
+        if file not in machine.list_files():
+            raise ValueError(f"{file} is not on {machine_id}")
+        if robot_id and robot_id not in self.robots:
+            raise ValueError(f"unknown robot {robot_id}")
+        state = machine.state()
+        with self.lock:
+            if state != "idle" or any(j["machine_id"] == machine_id and j["status"] in HOLDING_JOB for j in self.jobs.values()):
+                raise ValueError(f"{machine.spec.get('name') or machine_id} is busy; try again when it is free")
+            job = self._new_job(f"Print {file}", machine_id, file, self.default_output_zone, "started from Settings",
+                                needs_approval=self.require_confirmation)
+            job.update(origin="chat", preferred_robot=robot_id)  # progress shows up in the StarForge conversation
+            self._event("request", f"{job['id']}: print {file} on {machine_id} (from Settings)", job_id=job["id"])
+        if not self.require_confirmation:
+            self.confirm_job(job["id"])
+        return dict(job)
 
     # documents ---------------------------------------------------------------
 

@@ -248,7 +248,7 @@ class AssistantMixin:
             return said or "I can start machines, run production and move parts. What should I do?"
 
         if not self.machines:
-            return "There are no machines yet. Add one in **Setup → Machines**, then ask me again."
+            return "There are no machines yet. Add one in **Settings → Machines**, then ask me again."
         file = choice.get("file")
         candidates = [self.machines[machine_id]] if machine_id else (
             [self.machines[choice["machine_id"]]] if choice.get("machine_id") in self.machines else [])
@@ -282,7 +282,7 @@ class AssistantMixin:
 
     def _chat_start_run(self, text: str, choice: dict, document, said: str) -> str:
         if not self.machines:
-            return "There are no machines yet. Add one in **Setup → Machines**, then ask me again."
+            return "There are no machines yet. Add one in **Settings → Machines**, then ask me again."
         name = (choice.get("product") or "").strip()[:60] or "Production"
         name = re.sub(r"[^\w .,()/+#-]", " ", name).strip() or "Production"
         quantity = int(choice.get("quantity") or 0)
@@ -312,9 +312,9 @@ class AssistantMixin:
     def _robot_warning(self) -> str:
         online = [r for r in self.robots.values() if r["status"] not in {"offline", "fault"}]
         if not self.robots:
-            return " ⚠ There are no robots yet, so nobody can collect the part. Add one in Setup → Robots."
+            return " ⚠ There are no robots yet, so nobody can collect the part. Add one in Settings → Robots."
         if not online:
-            return " ⚠ No robots are online right now. Add or connect a robot in Setup so the part can be collected."
+            return " ⚠ No robots are online right now. Add or connect a robot in Settings so the part can be collected."
         return ""
 
     def _status_summary(self) -> str:

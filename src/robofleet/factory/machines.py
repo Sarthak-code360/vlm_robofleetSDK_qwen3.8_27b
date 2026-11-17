@@ -58,6 +58,19 @@ class _PrinterBase(Machine):
     def list_files(self) -> list[str]:
         return list_print_files(self.prints_dir())
 
+    def file_details(self) -> list[dict]:
+        """Job files with size and date. ``uploaded`` files live in the prints folder and can be deleted."""
+        folder = self.prints_dir()
+        details = []
+        for name in self.list_files():
+            path = folder / name
+            if path.is_file():
+                st = path.stat()
+                details.append({"name": name, "size": st.st_size, "modified": round(st.st_mtime, 1), "deletable": True})
+            else:
+                details.append({"name": name, "size": None, "modified": None, "deletable": False})
+        return details
+
 
 class SimulatedPrinter(_PrinterBase):
     """A printer that 'prints' for ``print_seconds`` (default 20). For demos and tests."""
@@ -69,7 +82,7 @@ class SimulatedPrinter(_PrinterBase):
         self._file: str | None = None
 
     def list_files(self) -> list[str]:
-        return super().list_files() or list(self.spec.get("files", []))
+        return sorted(set(super().list_files()) | set(self.spec.get("files", [])))
 
     def _progress(self) -> float:
         if self._started is None:

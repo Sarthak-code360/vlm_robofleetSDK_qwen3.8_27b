@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-17
+
+### Added
+
+- Print files per machine: in Settings → Machines, click a machine to see its files, upload a sliced `.gcode.3mf`
+  from your computer (streamed, up to 500 MB, checked to be a real 3MF), print any file with one click, or delete
+  uploaded files. API: `GET|POST /api/machines/<id>/files`, `DELETE /api/machines/<id>/files/<name>`,
+  `POST /api/machines/<id>/print`.
+- `robofleet factory serve --simulate-robots`: brings every robot in the factory file online as a simulated robot.
+
+### Changed
+
+- Light theme.
+- Tabs: Production (opens first), Overview, Settings, Activity. The StarForge AI chat now lives on the Overview.
+- Fixed: a sent chat message was shown twice until the reply arrived.
+- Simulated printers list both their configured files and the files in their prints folder.
+
 ## [0.5.0] - 2026-11-17
 
 ### Added

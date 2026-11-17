@@ -110,15 +110,12 @@ RBT-004 finished TASK-0002
 
 The dashboard runs the whole factory without the command line:
 
-- **StarForge AI:** the factory's own AI worker, a chat. Type "print the actuator gear" and a machine starts; when it
-  finishes, a robot is assigned and delivers the part. Optionally pick the machine and robot, or attach a process
-  PDF. It answers status questions and alerts you when a machine or robot is missing. It is also on the Overview.
-- **Production:** set up once (process PDF, robots, machines, product, target quantity, parts per unit) and press
-  **Run Factory**. Machines are kept busy, robots deliver every part, and progress is tracked until the target.
-- **Overview:** robots ready, machines working, robot battery, the chat, what is happening right now, and the
-  factory floor map.
-- **Setup:** add robots (one or many, simulated or real) and machines (simulated or Bambu Lab) with a name and a
-  location. Zones and process documents are here too.
+- **Production** (opens first): set up once (process PDF, robots, machines, product, target quantity, parts per
+  unit) and press **Run Factory**. Machines are kept busy, robots deliver every part, and progress is tracked.
+- **Overview:** robots ready, machines working, battery, the **StarForge AI** chat (the factory's own AI worker:
+  type "print the actuator gear" and a machine starts, then a robot delivers the part), live status and the floor.
+- **Settings:** add robots and machines with a name and a location. Click a machine to upload a print file from
+  your computer and print it. Zones and process documents are here too.
 - **Activity:** every update, and the list of machine jobs and robot tasks.
 
 Robots, machines, zones and documents added in the dashboard are saved in `data/` and come back after a restart.
