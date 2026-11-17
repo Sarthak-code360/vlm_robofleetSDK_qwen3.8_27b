@@ -358,6 +358,17 @@ class DashboardRegistryTest(unittest.TestCase):
             httpd.server_close()
 
 
+class SimulateRobotsTest(unittest.TestCase):
+    def test_file_robots_come_online(self):
+        factory = make_factory(None)
+        self.assertEqual(sorted(factory.simulate_robots()), ["RBT-001", "RBT-002"])
+        try:
+            self.assertTrue(wait_for(lambda: all(r["status"] == "idle" for r in factory.robots.values())))
+            self.assertEqual(factory.simulate_robots(), [])  # already running
+        finally:
+            factory.stop_simulated_robots()
+
+
 class ProductionRunTest(unittest.TestCase):
     def deliver_all(self, factory, robot="RBT-001"):
         """Plays the robot: picks up every task it is given and reports it done."""

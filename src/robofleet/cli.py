@@ -1,7 +1,7 @@
 """Command line tool: ``robofleet <command>``.
 
 Autonomous factory:
-  robofleet factory serve --config examples/actuator_factory/factory.json [--simulate-machines]
+  robofleet factory serve --config examples/actuator_factory/factory.json [--simulate-machines] [--simulate-robots]
   robofleet robot sim --count 10                 # 10 simulated robots
   robofleet robot run --id RBT-001 --exec 'bash real/run_fast.sh {instruction}'   # a real robot
   (robots, machines, zones and work instruction PDFs can also be added in the dashboard)
@@ -174,6 +174,8 @@ def cmd_factory_serve(args) -> None:
         _stop(str(e))
     except ImportError as e:
         _stop(f"{e}\n   Or run with --simulate-machines to use simulated printers.")
+    if args.simulate_robots:
+        factory.simulate_robots()
     where = f"http://{'localhost' if args.host in {'127.0.0.1', '0.0.0.0'} else args.host}:{args.port}"
     print(f"Factory '{factory.config.get('name')}' running")
     print(f"  dashboard: {where}/" + (f"#token={args.token}" if args.token else ""))
@@ -289,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = fsub.add_parser("serve", help="run the factory brain (API + dashboard + control loop)")
     sp.add_argument("--config", type=Path, required=True, help="factory file, e.g. examples/actuator_factory/factory.json")
     sp.add_argument("--simulate-machines", action="store_true", help="use simulated printers instead of real ones")
+    sp.add_argument("--simulate-robots", action="store_true", help="bring every robot in the factory file online as a simulated robot")
     sp.add_argument("--offline", action="store_true", help="no model: keyword matching + rule-based dispatch")
     sp.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to accept robots on the network")
     sp.add_argument("--port", type=int, default=8080)

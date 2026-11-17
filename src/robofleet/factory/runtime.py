@@ -977,6 +977,20 @@ class Factory(AssistantMixin):
                            zone=zone, battery=battery, verbose=False)
         threading.Thread(target=agent.run_forever, args=(stop,), daemon=True, name=f"sim-{robot_id}").start()
 
+    def simulate_robots(self, seed: int = 1) -> list[str]:
+        """Brings every offline robot online as a built-in simulated robot (for demos without hardware)."""
+        import random
+
+        rng = random.Random(seed)
+        started = []
+        with self.lock:
+            for robot in self.robots.values():
+                if robot["status"] == "offline" and robot["id"] not in self._agents:
+                    robot["connection"] = "simulated"
+                    self._start_simulated_robot(robot["id"], robot["home_zone"] or robot["zone"], rng.randint(60, 100))
+                    started.append(robot["id"])
+        return started
+
     def stop_simulated_robots(self) -> None:
         for stop in self._agents.values():
             stop.set()
