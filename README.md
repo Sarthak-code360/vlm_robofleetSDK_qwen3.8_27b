@@ -97,8 +97,8 @@ robofleet robot sim --count 10
 robofleet factory request "print the actuator housing" --confirm
 ```
 
-Open **http://localhost:8080** for the live dashboard. The printer "prints" for 20 s. The nearest suitable robot then
-picks up the part from the Print Bay and brings it to the Output Box:
+Open **http://localhost:8080** for the **Operations Center** dashboard. The printer "prints" for 20 s. The nearest
+suitable robot then picks up the part from the Print Bay and brings it to the Output Box:
 
 ```
 JOB-0001 started: PRINTER-1 running actuator_housing.gcode.3mf
@@ -107,6 +107,20 @@ TASK-0002 -> RBT-004 (rules: Nearest available robot (6 m).)
 RBT-004 picked up TASK-0002: Collect the finished part 'actuator_housing.gcode.3mf' from PRINTER-1 at Print Bay ...
 RBT-004 finished TASK-0002
 ```
+
+The dashboard runs the whole factory without the command line:
+
+- **Overview:** fleet availability, machine utilization, delivery success and fleet energy gauges, a machine state
+  timeline, fleet status, deliveries chart and a live floor map with robot positions and active routes.
+- **Work Orders:** describe the work in plain language, choose the delivery zone and priority, and attach a work
+  instruction PDF for the robot. Jobs wait for **Review & Start** (with a safety check) before a machine starts.
+- **Robot Fleet:** register one robot or a batch of robots: type, model, home zone, payload, capabilities. A robot is
+  either a *digital twin* (simulated inside the server) or an *edge agent* (a real robot running `robofleet robot run`;
+  the dashboard shows the command).
+- **Machines & Layout:** register simulated or Bambu Lab printers (IP, serial, access code) and add zones.
+- **Documents** and **Activity Log**.
+
+Robots, machines, zones and documents added in the dashboard are saved in `data/` and come back after a restart.
 
 Next steps:
 

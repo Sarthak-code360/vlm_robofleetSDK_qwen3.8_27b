@@ -1,6 +1,10 @@
+import copy
+import json
+import tempfile
 import threading
 import time
 import unittest
+import urllib.request
 from pathlib import Path
 
 from robofleet import ModelError
@@ -43,10 +47,13 @@ class FakeModel:
         return dict(answer), {"model": "fake", "latency_s": 0, "usage": {}}
 
 
-def make_factory(model=None, **overrides):
-    config = {**CONFIG, **overrides}
+def make_factory(model=None, data_dir=None, **overrides):
+    config = copy.deepcopy({**CONFIG, **overrides})
     machines = {m["id"]: SimulatedPrinter(m, Path(".")) for m in config["machines"]}
-    return Factory(config, machines, model)
+    return Factory(config, machines, model, data_dir=data_dir, base_dir=Path("."))
+
+
+PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 
 
 def wait_for(predicate, timeout=5.0):
@@ -201,6 +208,152 @@ class HttpEndToEndTest(unittest.TestCase):
             self.assertEqual(client.state()["robots"][0]["status"], "idle")
         finally:
             stop.set()
+            httpd.shutdown()
+            httpd.server_close()
+
+
+class DashboardRegistryTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.data = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_register_simulated_robots_and_they_do_the_work(self):
+        factory = make_factory(None, data_dir=self.data, robots=[])
+        factory.sim_speed_m_s, factory.sim_handling_s = 1000, 0
+        added = factory.add_robots({"name": "Mobile Manipulator", "kind": "mobile_manipulator", "home_zone": "Park",
+                                    "connection": "simulated", "count": 3})
+        self.assertEqual([r["id"] for r in added], ["RBT-001", "RBT-002", "RBT-003"])
+        self.assertEqual(added[0]["name"], "Mobile Manipulator 001")
+        self.assertTrue(wait_for(lambda: all(r["status"] == "idle" for r in factory.robots.values())))
+        try:
+            factory.add_machine({"id": "PRINTER-2", "name": "Twin printer", "zone": "Print Bay", "driver": "simulated",
+                                 "files": "bracket.gcode.3mf, cap.gcode.3mf", "print_seconds": 1})
+            factory.require_confirmation = False
+            result = factory.submit_request("print the bracket")
+            self.assertTrue(result["ok"], result)
+            job_id = result["job"]["id"]
+            for _ in range(200):
+                factory.tick()
+                if factory.jobs[job_id]["status"] == "delivered":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(factory.jobs[job_id]["status"], "delivered", factory.events[-5:])
+        finally:
+            factory.stop_simulated_robots()
+
+    def test_validation(self):
+        factory = make_factory(None, data_dir=self.data)
+        bad = [
+            ({"id": "RBT-001", "home_zone": "Park"}, "already exists"),
+            ({"id": "bad id!", "home_zone": "Park"}, "robot ID"),
+            ({"id": "X-1", "home_zone": "Moon"}, "unknown zone"),
+            ({"id": "X-1", "home_zone": "Park", "kind": "tank"}, "kind"),
+            ({"home_zone": "Park", "count": 99}, "count"),
+        ]
+        for spec, message in bad:
+            with self.assertRaisesRegex(ValueError, message):
+                factory.add_robots(spec)
+        with self.assertRaisesRegex(ValueError, "ip must be"):
+            factory.add_machine({"id": "P-9", "zone": "Print Bay", "driver": "bambu",
+                                 "ip": "not-an-ip", "serial": "ABC123", "access_code": "1234"})
+        with self.assertRaisesRegex(ValueError, "job file"):
+            factory.add_machine({"id": "P-9", "zone": "Print Bay", "driver": "simulated", "files": "../x"})
+        with self.assertRaisesRegex(ValueError, "factory file"):
+            factory.remove_robot("RBT-001")
+        with self.assertRaisesRegex(ValueError, "factory file"):
+            factory.remove_machine("PRINTER-1")
+
+    def test_registry_survives_restart_and_hides_access_code(self):
+        factory = make_factory(None, data_dir=self.data, simulate_machines=True)
+        factory.add_zone("Inspection", 4, 4)
+        factory.add_robots({"id": "ARM-1", "name": "SO-101 Arm", "kind": "robotic_arm", "home_zone": "Inspection",
+                            "connection": "agent"})
+        factory.add_machine({"id": "PRINTER-2", "zone": "Inspection", "driver": "bambu", "ip": "192.168.1.40",
+                             "serial": "03900ABC", "access_code": "s3cret"})
+        state = json.dumps(factory.state())
+        self.assertNotIn("s3cret", state)
+        self.assertEqual(oct((self.data / "registry.json").stat().st_mode & 0o777), "0o600")
+
+        again = make_factory(None, data_dir=self.data, simulate_machines=True)
+        self.assertIn("Inspection", again.site["zones"])
+        self.assertEqual(again.robots["ARM-1"]["kind"], "robotic_arm")
+        self.assertEqual(again.robots["ARM-1"]["source"], "dashboard")
+        self.assertIn("PRINTER-2", again.machines)
+        again.remove_robot("ARM-1")
+        again.remove_machine("PRINTER-2")
+        third = make_factory(None, data_dir=self.data)
+        self.assertNotIn("ARM-1", third.robots)
+        self.assertNotIn("PRINTER-2", third.machines)
+
+    def test_attachment_name_does_not_steer_keyword_matching(self):
+        factory = make_factory(None, data_dir=self.data)
+        doc = factory.add_document("Actuator Housing SOP.pdf", PDF)
+        result = factory.submit_request("print the actuator gear", document_id=doc["id"])
+        self.assertEqual(result["job"]["file"], "actuator_gear.gcode.3mf")
+        self.assertEqual(result["job"]["document"]["id"], doc["id"])
+
+    def test_cancel_job(self):
+        factory = make_factory(FakeModel(PRINT_HOUSING))
+        job = factory.submit_request("print it")["job"]
+        self.assertEqual(factory.cancel_job(job["id"])["status"], "cancelled")
+        self.assertTrue(factory.submit_request("print it")["ok"])  # the machine is free again
+        with self.assertRaises(ValueError):
+            factory.cancel_job(job["id"])
+
+    def test_documents_reach_the_robot_over_http(self):
+        factory = make_factory(FakeModel(PRINT_HOUSING), data_dir=self.data, require_confirmation=False,
+                               robots=[{"id": "RBT-001", "home_zone": "Park"}])
+        stop = threading.Event()
+        httpd = make_server(factory, "127.0.0.1", 0, token="secret")
+        url = f"http://127.0.0.1:{httpd.server_address[1]}"
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        threading.Thread(target=factory.run_forever, args=(0.05, stop), daemon=True).start()
+        try:
+            upload = urllib.request.Request(url + "/api/documents", data=PDF, method="POST", headers={
+                "Authorization": "Bearer secret", "Content-Type": "application/pdf", "X-Filename": "Housing%20SOP.pdf"})
+            with urllib.request.urlopen(upload) as r:
+                doc = json.load(r)
+            self.assertEqual((doc["id"], doc["name"]), ("DOC-001", "Housing SOP.pdf"))
+            not_pdf = urllib.request.Request(url + "/api/documents", data=b"hello", method="POST",
+                                             headers={"Authorization": "Bearer secret"})
+            with self.assertRaises(urllib.error.HTTPError) as err:
+                urllib.request.urlopen(not_pdf)
+            err.exception.close()
+            with urllib.request.urlopen(f"{url}/api/documents/DOC-001?token=secret") as r:
+                self.assertEqual(r.read(), PDF)
+
+            client = FactoryClient(url, "secret")
+            folder = self.data / "robot"
+            client.fetch_document = lambda document, f=None, _orig=client.fetch_document: _orig(document, folder)
+            agent = RobotAgent(client, "RBT-001", CommandExecutor("cat {document} > /dev/null && echo got {document}"),
+                               zone="Park", battery=80, interval_s=0.05, verbose=False)
+            threading.Thread(target=agent.run_forever, args=(stop,), daemon=True).start()
+
+            result = client.call("/api/requests", {"text": "print it", "document_id": "DOC-001",
+                                                   "deliver_to": "Park", "priority": "urgent"})
+            self.assertTrue(result["ok"], result)
+            job_id = result["job"]["id"]
+            self.assertTrue(wait_for(lambda: factory.jobs[job_id]["status"] == "delivered", 10), factory.events[-5:])
+            task = factory.tasks[factory.jobs[job_id]["task_id"]]
+            self.assertEqual((task["to_zone"], task["priority"]), ("Park", "urgent"))
+            self.assertIn("Housing SOP.pdf", task["instruction"])
+            self.assertIn("DOC-001.pdf", task["note"])
+            self.assertEqual((folder / "DOC-001.pdf").read_bytes(), PDF)
+
+            robots = client.call("/api/robots", {"name": "Twin", "home_zone": "Dock", "count": 2})["robots"]
+            self.assertEqual([r["id"] for r in robots], ["RBT-002", "RBT-003"])
+            delete = urllib.request.Request(url + "/api/robots/RBT-002", method="DELETE",
+                                            headers={"Authorization": "Bearer secret"})
+            urllib.request.urlopen(delete).close()
+            self.assertNotIn("RBT-002", factory.robots)
+            with urllib.request.urlopen(url + "/") as r:
+                self.assertIn(b"RoboFleet Operations Center", r.read())
+        finally:
+            stop.set()
+            factory.stop_simulated_robots()
             httpd.shutdown()
             httpd.server_close()
 

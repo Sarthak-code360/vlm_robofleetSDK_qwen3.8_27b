@@ -22,8 +22,12 @@ REQUIRED_KEYS = ("zones", "chargers", "rules", "machines")
 
 
 def load_factory(path: str | Path, model: ModelClient | None = None, simulate_machines: bool = False,
-                 log_path: str | Path | None = None) -> Factory:
-    """Builds a :class:`Factory` from a factory file. Machine paths in it are relative to the file."""
+                 log_path: str | Path | None = None, data_dir: str | Path | None = None) -> Factory:
+    """Builds a :class:`Factory` from a factory file. Machine paths in it are relative to the file.
+
+    ``data_dir`` keeps robots, machines and zones added from the dashboard, and uploaded documents,
+    across restarts. Relative paths of dashboard-added machines resolve against the current folder.
+    """
     path = Path(path)
     config = load_json(path)
     missing = [k for k in REQUIRED_KEYS if k not in config]
@@ -35,7 +39,8 @@ def load_factory(path: str | Path, model: ModelClient | None = None, simulate_ma
     if config.get("default_output_zone") not in config["zones"]:
         raise ValueError(f"{path}: default_output_zone must be one of the zones")
     machines = {spec["id"]: build_machine(spec, path.parent, simulate_machines) for spec in config["machines"]}
-    return Factory(config, machines, model, log_path)
+    return Factory(config, machines, model, log_path, data_dir=data_dir, base_dir=Path.cwd(),
+                   simulate_machines=simulate_machines)
 
 
 __all__ = [

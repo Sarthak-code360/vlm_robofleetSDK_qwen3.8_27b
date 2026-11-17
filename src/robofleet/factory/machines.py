@@ -107,7 +107,8 @@ class BambuMachine(_PrinterBase):
         from ..coordinator import load_json
         from ..printers import BambuPrinter
 
-        self.config = load_json(base_dir / spec["config"])["printer"]
+        # Printer details come inline (added from the dashboard) or from a printer config file.
+        self.config = spec["printer"] if "printer" in spec else load_json(base_dir / spec["config"])["printer"]
         self.printer = BambuPrinter.from_config(self.config)
         self.min_poll_s = float(spec.get("poll_seconds", 10))
         self._lock = threading.Lock()

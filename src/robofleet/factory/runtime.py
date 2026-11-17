@@ -15,7 +15,9 @@ The model never moves anything itself: everything it proposes is checked in code
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
 import re
 import threading
 import time
@@ -23,10 +25,19 @@ from pathlib import Path
 
 from ..coordinator import Coordinator
 from ..model import ModelClient, ModelError
-from .machines import Machine, MachineError
+from .machines import DRIVERS, Machine, MachineError, build_machine
 
 ROBOT_STATUSES = {"idle", "busy", "charging", "fault"}
+ROBOT_KINDS = {"mobile_manipulator", "robotic_arm", "amr", "humanoid", "other"}
+CONNECTIONS = {"simulated", "agent"}
+MACHINE_TYPES = {"3d_printer"}
+PRIORITIES = {"normal", "urgent"}
+ACTIVE_JOB = {"awaiting_confirmation", "starting", "running"}
 NONE = "none"
+ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
+NAME_RE = re.compile(r"^[\w .,()/+#-]{1,60}$")
+MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+HISTORY_S = 3600
 
 
 class Factory:
@@ -37,14 +48,22 @@ class Factory:
         machines: Machine drivers by id (see ``machines.build_machine``).
         model: The central model. ``None`` = keyword matching for requests and rules for dispatch.
         log_path: Optional JSONL file for every event.
+        data_dir: Where robots, machines and zones added from the dashboard, and uploaded documents, are kept.
+            ``None`` = nothing is saved and documents cannot be uploaded.
+        base_dir: Folder that relative paths of dashboard-added machines (e.g. ``prints``) are resolved against.
+        simulate_machines: Build dashboard-added real machines as simulated ones.
     """
 
     def __init__(self, config: dict, machines: dict[str, Machine], model: ModelClient | None = None,
-                 log_path: str | Path | None = None):
+                 log_path: str | Path | None = None, data_dir: str | Path | None = None,
+                 base_dir: str | Path | None = None, simulate_machines: bool = False):
         self.config = config
         self.machines = machines
         self.model = model
         self.log_path = Path(log_path) if log_path else None
+        self.data_dir = Path(data_dir) if data_dir else None
+        self.base_dir = Path(base_dir) if base_dir else Path.cwd()
+        self.simulate_machines = simulate_machines
         self.rules = config["rules"]
         self.site = {"type": config.get("type", "factory"), "zones": config["zones"],
                      "chargers": config["chargers"], "rules": self.rules}
@@ -55,7 +74,13 @@ class Factory:
 
         self.robots: dict[str, dict] = {}
         for r in config.get("robots", []):
-            self._register_robot(r["id"], r.get("name"), r.get("home_zone"))
+            self._register_robot(r, source="file")
+        self.machine_source = {mid: "file" for mid in machines}
+        self.machine_history: dict[str, list[list]] = {}
+        self.documents: dict[str, dict] = {}
+        self.registry = {"zones": {}, "machines": [], "robots": []}
+        self._agents: dict[str, threading.Event] = {}
+        self.sim_speed_m_s, self.sim_handling_s = 1.0, 2.0  # built-in simulated robots
         self.jobs: dict[str, dict] = {}
         self.tasks: dict[str, dict] = {}
         self.outbox: dict[str, list[dict]] = {}
@@ -64,6 +89,8 @@ class Factory:
         self.lock = threading.RLock()
         self._counter = 0
         self._dispatching = threading.Lock()
+        if self.data_dir:
+            self._load_registry()
 
     # ------------------------------------------------------------------ helpers
 
@@ -80,10 +107,15 @@ class Factory:
             with self.log_path.open("a") as f:
                 f.write(json.dumps(event, default=str) + "\n")
 
-    def _register_robot(self, robot_id: str, name: str | None = None, zone: str | None = None) -> dict:
-        robot = {"id": robot_id, "name": name or robot_id, "zone": zone if zone in self.site["zones"] else None,
+    def _register_robot(self, spec: dict, source: str) -> dict:
+        zone = spec.get("home_zone") or spec.get("zone")
+        robot = {"id": spec["id"], "name": spec.get("name") or spec["id"], "kind": spec.get("kind", "other"),
+                 "model": spec.get("model", ""), "home_zone": zone if zone in self.site["zones"] else None,
+                 "payload_kg": spec.get("payload_kg"), "capabilities": list(spec.get("capabilities") or []),
+                 "connection": spec.get("connection", "agent"), "source": source,
+                 "zone": zone if zone in self.site["zones"] else None,
                  "battery": 0, "status": "offline", "last_seen": None, "info": {}}
-        self.robots[robot_id] = robot
+        self.robots[robot["id"]] = robot
         return robot
 
     def _active_tasks(self, robot_id: str) -> list[str]:
@@ -95,7 +127,8 @@ class Factory:
     def heartbeat(self, robot_id: str, data: dict) -> dict:
         """A robot reports its state; the reply carries its next task and any instructions."""
         with self.lock:
-            robot = self.robots.get(robot_id) or self._register_robot(robot_id, data.get("name"))
+            robot = self.robots.get(robot_id) or self._register_robot(
+                {"id": robot_id, "name": data.get("name")}, source="heartbeat")
             was_offline = robot["status"] == "offline"
             if data.get("zone") in self.site["zones"]:
                 robot["zone"] = data["zone"]
@@ -130,20 +163,40 @@ class Factory:
 
     # ------------------------------------------------------------------ requests
 
-    def submit_request(self, text: str) -> dict:
-        """Turns a plain-English request into a machine job or a robot task. Returns what was created."""
+    def submit_request(self, text: str, document_id: str | None = None, deliver_to: str | None = None,
+                       priority: str = "normal") -> dict:
+        """Turns a plain-English request into a machine job or a robot task. Returns what was created.
+
+        Args:
+            text: What the person wants, e.g. "print the actuator housing".
+            document_id: An uploaded reference PDF (work instruction) handed to the robot that does the work.
+            deliver_to: Zone for the finished part. ``None`` = the model decides (default output zone).
+            priority: ``normal`` or ``urgent``.
+        """
+        if priority not in PRIORITIES:
+            raise ValueError(f"priority must be one of {', '.join(sorted(PRIORITIES))}")
+        if deliver_to and deliver_to not in self.site["zones"]:
+            raise ValueError(f"unknown zone {deliver_to!r}")
+        document = None
+        if document_id:
+            if document_id not in self.documents:
+                raise KeyError(document_id)
+            document = {k: self.documents[document_id][k] for k in ("id", "name")}
         with self.lock:
             machines = [m.describe() | {"files": m.list_files()} for m in self.machines.values()]
-        choice, stats = self._interpret(text, machines)
+        note = f"(Attached work instruction: {document['name']})" if document else ""
+        choice, stats = self._interpret(text, machines, note)
+        if deliver_to:
+            choice = dict(choice, to_zone=deliver_to)
         with self.lock:
-            result = self._apply_choice(text, choice, machines)
+            result = self._apply_choice(text, choice, machines, document=document, priority=priority)
             result["model"] = stats
             self._event("request", f"Request {text!r} -> {result['summary']}", result=result)
         if result.get("job") and not self.require_confirmation:
             self.confirm_job(result["job"]["id"])
         return result
 
-    def _interpret(self, text: str, machines: list[dict]) -> tuple[dict, dict]:
+    def _interpret(self, text: str, machines: list[dict], note: str = "") -> tuple[dict, dict]:
         files = sorted({f for m in machines for f in m["files"]})
         zones = list(self.site["zones"])
         schema = {
@@ -171,7 +224,7 @@ class Factory:
                 "- move_item: a robot carries something from from_zone to to_zone.\n"
                 f"- {NONE}: the request cannot be done with these machines and zones.\n"
                 f"Use \"{NONE}\" for fields that do not apply. Keep the reason under 20 words. JSON only.")},
-            {"role": "user", "content": "Factory:\n" + json.dumps(briefing, separators=(",", ":")) + f"\n\nRequest: {text}"},
+            {"role": "user", "content": "Factory:\n" + json.dumps(briefing, separators=(",", ":")) + f"\n\nRequest: {text}" + (f"\n{note}" if note else "")},
         ]
         if self.model is not None:
             try:
@@ -180,7 +233,8 @@ class Factory:
                 self._event("model", f"Model failed, using keyword matching: {e}")
         return _keyword_choice(text, machines, self.default_output_zone), {"model": "keywords", "latency_s": 0}
 
-    def _apply_choice(self, text: str, choice: dict, machines: list[dict]) -> dict:
+    def _apply_choice(self, text: str, choice: dict, machines: list[dict], document: dict | None = None,
+                      priority: str = "normal") -> dict:
         """Checks the model's choice in code and creates the job or task."""
         by_id = {m["id"]: m for m in machines}
         action, reason = choice.get("action"), choice.get("reason", "")
@@ -194,11 +248,11 @@ class Factory:
                         "choice": choice}
             if machine["state"] != "idle":
                 return {"ok": False, "summary": f"rejected: {machine['id']} is {machine['state']}", "choice": choice}
-            if any(j["machine_id"] == machine["id"] and j["status"] in {"awaiting_confirmation", "starting", "running"}
-                   for j in self.jobs.values()):
+            if any(j["machine_id"] == machine["id"] and j["status"] in ACTIVE_JOB for j in self.jobs.values()):
                 return {"ok": False, "summary": f"rejected: {machine['id']} already has a job", "choice": choice}
             job = {"id": self._next_id("JOB"), "request": text, "machine_id": machine["id"], "file": choice["file"],
                    "deliver_to": to_zone, "reason": reason, "created": time.time(), "task_id": None,
+                   "document": document, "priority": priority,
                    "status": "awaiting_confirmation" if self.require_confirmation else "starting"}
             self.jobs[job["id"]] = job
             return {"ok": True, "summary": f"{job['id']}: {machine['id']} will run {job['file']}, then deliver to {to_zone}",
@@ -207,7 +261,8 @@ class Factory:
             src, dst = choice.get("from_zone"), choice.get("to_zone")
             if src not in self.site["zones"] or dst not in self.site["zones"] or src == dst:
                 return {"ok": False, "summary": f"rejected: bad zones {src!r} -> {dst!r}", "choice": choice}
-            task = self._new_task(src, dst, f"Carry the item requested ({text}) from {src} to {dst}.")
+            task = self._new_task(src, dst, f"Carry the item requested ({text}) from {src} to {dst}.",
+                                  document=document, priority=priority)
             return {"ok": True, "summary": f"{task['id']}: move item {src} -> {dst}", "task": dict(task), "choice": choice}
         return {"ok": False, "summary": f"nothing to do ({reason or 'no matching machine or zone'})", "choice": choice}
 
@@ -222,6 +277,18 @@ class Factory:
             job["status"] = "starting"
         threading.Thread(target=self._start_job, args=(job_id,), daemon=True).start()
         return dict(job)
+
+    def cancel_job(self, job_id: str) -> dict:
+        """Cancels a job that has not started yet."""
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job["status"] != "awaiting_confirmation":
+                raise ValueError(f"{job_id} is {job['status']}; only jobs awaiting approval can be cancelled")
+            job["status"] = "cancelled"
+            self._event("job", f"{job_id} cancelled", job_id=job_id)
+            return dict(job)
 
     def _start_job(self, job_id: str) -> None:
         job = self.jobs[job_id]
@@ -262,7 +329,8 @@ class Factory:
                     machine = self.machines[job["machine_id"]]
                     task = self._new_task(machine.zone, job["deliver_to"],
                                           f"Collect the finished part '{job['file']}' from {machine.id} at {machine.zone} "
-                                          f"and place it in {job['deliver_to']}.", job_id=job["id"])
+                                          f"and place it in {job['deliver_to']}.", job_id=job["id"],
+                                          document=job.get("document"), priority=job.get("priority", "normal"))
                     job.update(status="done", finished=time.time(), task_id=task["id"])
                     self._event("job", f"{job['id']} finished on {machine.id}; created {task['id']} to collect it",
                                 job_id=job["id"], task_id=task["id"])
@@ -271,10 +339,14 @@ class Factory:
                     self._event("job", f"{job['id']} FAILED on {job['machine_id']}", job_id=job["id"])
         self.dispatch()
 
-    def _new_task(self, from_zone: str, to_zone: str, instruction: str, job_id: str | None = None) -> dict:
+    def _new_task(self, from_zone: str, to_zone: str, instruction: str, job_id: str | None = None,
+                  document: dict | None = None, priority: str = "normal") -> dict:
+        if document:
+            instruction += f" Follow the work instruction '{document['name']}'."
+            document = dict(document, url=f"/api/documents/{document['id']}")
         task = {"id": self._next_id("TASK"), "type": "pick_and_place", "from_zone": from_zone, "to_zone": to_zone,
-                "instruction": instruction, "priority": "normal", "battery_cost": self.rules.get("task_battery_cost", 5),
-                "job_id": job_id, "robot_id": None, "status": "pending", "created": time.time()}
+                "instruction": instruction, "priority": priority, "battery_cost": self.rules.get("task_battery_cost", 5),
+                "job_id": job_id, "document": document, "robot_id": None, "status": "pending", "created": time.time()}
         self.tasks[task["id"]] = task
         return task
 
@@ -333,24 +405,372 @@ class Factory:
                 self._event("error", f"tick failed: {e!r}")
             stop.wait(interval_s)
 
+    # ------------------------------------------------------------------ registry (dashboard)
+
+    def _free_ids(self, prefix: str, count: int, taken) -> list[str]:
+        numbers = [int(m.group(1)) for i in taken if (m := re.fullmatch(rf"{re.escape(prefix)}-(\d+)", i))]
+        start = max(numbers, default=0) + 1
+        return [f"{prefix}-{n:03d}" for n in range(start, start + count)]
+
+    def _check_zone(self, zone) -> str:
+        if zone not in self.site["zones"]:
+            raise ValueError(f"unknown zone {zone!r}")
+        return zone
+
+    def add_zone(self, name: str, x: float, y: float) -> dict:
+        """Adds a named place on the floor (x/y in metres)."""
+        name = str(name or "").strip()
+        if not NAME_RE.match(name):
+            raise ValueError("zone name: 1-60 letters, digits, spaces or .,()/+#-")
+        try:
+            x, y = float(x), float(y)
+        except (TypeError, ValueError):
+            raise ValueError("x and y must be numbers (metres)") from None
+        if not (-10_000 <= x <= 10_000 and -10_000 <= y <= 10_000):
+            raise ValueError("x and y must be within ±10000 m")
+        with self.lock:
+            if name in self.site["zones"]:
+                raise ValueError(f"zone {name!r} already exists")
+            self.site["zones"][name] = {"x": x, "y": y}
+            self.registry["zones"][name] = {"x": x, "y": y}
+            self._save_registry()
+            self._event("config", f"Zone '{name}' added at ({x:g}, {y:g})")
+            return {"name": name, "x": x, "y": y}
+
+    def add_robots(self, spec: dict) -> list[dict]:
+        """Registers one robot, or ``count`` robots with generated IDs.
+
+        spec: id (optional when count > 1), name, kind, model, home_zone, payload_kg, capabilities,
+              connection ("simulated" = built-in virtual robot, "agent" = robot runs ``robofleet robot run``),
+              battery (starting charge of simulated robots), count.
+        """
+        try:
+            count = int(spec.get("count") or 1)
+        except (TypeError, ValueError):
+            raise ValueError("count must be a whole number") from None
+        if not 1 <= count <= 50:
+            raise ValueError("count must be between 1 and 50")
+        kind = spec.get("kind") or "mobile_manipulator"
+        if kind not in ROBOT_KINDS:
+            raise ValueError(f"kind must be one of {', '.join(sorted(ROBOT_KINDS))}")
+        connection = spec.get("connection") or "simulated"
+        if connection not in CONNECTIONS:
+            raise ValueError(f"connection must be one of {', '.join(sorted(CONNECTIONS))}")
+        zone = self._check_zone(spec.get("home_zone"))
+        name = str(spec.get("name") or "").strip()
+        if name and not NAME_RE.match(name):
+            raise ValueError("name: up to 60 letters, digits, spaces or .,()/+#-")
+        model = str(spec.get("model") or "").strip()[:60]
+        payload = spec.get("payload_kg")
+        if payload not in (None, ""):
+            try:
+                payload = float(payload)
+            except (TypeError, ValueError):
+                raise ValueError("payload_kg must be a number") from None
+            if not 0 <= payload <= 10_000:
+                raise ValueError("payload_kg must be between 0 and 10000")
+        else:
+            payload = None
+        caps = spec.get("capabilities") or ["pick_and_place"]
+        if isinstance(caps, str):
+            caps = [c.strip() for c in caps.split(",")]
+        caps = [c[:40] for c in caps if c][:12]
+        try:
+            battery = max(0.0, min(100.0, float(spec.get("battery", 100))))
+        except (TypeError, ValueError):
+            raise ValueError("battery must be a number") from None
+
+        with self.lock:
+            if count == 1 and spec.get("id"):
+                ids = [str(spec["id"]).strip()]
+            else:
+                ids = self._free_ids("RBT", count, self.robots)
+            for rid in ids:
+                if not ID_RE.match(rid):
+                    raise ValueError("robot ID: letters, digits, '.', '_' or '-' (max 40)")
+                if rid in self.robots:
+                    raise ValueError(f"robot {rid} already exists")
+            added = []
+            for i, rid in enumerate(ids, 1):
+                rname = name if count == 1 else f"{name or 'Robot'} {rid.split('-')[-1]}"
+                entry = {"id": rid, "name": rname or rid, "kind": kind, "model": model, "home_zone": zone,
+                         "payload_kg": payload, "capabilities": caps, "connection": connection, "battery": battery}
+                self._register_robot(entry, source="dashboard")
+                self.registry["robots"].append(entry)
+                if connection == "simulated":
+                    self._start_simulated_robot(rid, zone, battery)
+                added.append(dict(self.robots[rid]))
+            self._save_registry()
+            self._event("config", f"Registered {len(ids)} robot(s): {', '.join(ids)} ({connection})")
+            return added
+
+    def remove_robot(self, robot_id: str) -> dict:
+        with self.lock:
+            robot = self.robots.get(robot_id)
+            if robot is None:
+                raise KeyError(robot_id)
+            if robot["source"] == "file":
+                raise ValueError(f"{robot_id} is defined in the factory file; remove it there")
+            if self._active_tasks(robot_id):
+                raise ValueError(f"{robot_id} has an active task")
+            stop = self._agents.pop(robot_id, None)
+            if stop:
+                stop.set()
+            del self.robots[robot_id]
+            self.outbox.pop(robot_id, None)
+            self.registry["robots"] = [r for r in self.registry["robots"] if r["id"] != robot_id]
+            self._save_registry()
+            self._event("config", f"Robot {robot_id} removed")
+            return robot
+
+    def add_machine(self, spec: dict) -> dict:
+        """Registers a machine.
+
+        spec: id, name, type ("3d_printer"), driver ("simulated" or "bambu"), zone,
+              simulated: files (list or comma-separated), print_seconds
+              bambu: ip, serial, access_code, use_ams, prints_dir (default "prints"), poll_seconds
+        """
+        mid = str(spec.get("id") or "").strip()
+        if not ID_RE.match(mid):
+            raise ValueError("machine ID: letters, digits, '.', '_' or '-' (max 40)")
+        mtype = spec.get("type") or "3d_printer"
+        if mtype not in MACHINE_TYPES:
+            raise ValueError(f"type must be one of {', '.join(sorted(MACHINE_TYPES))}")
+        driver = spec.get("driver") or "simulated"
+        if driver not in DRIVERS:
+            raise ValueError(f"driver must be one of {', '.join(sorted(DRIVERS))}")
+        name = str(spec.get("name") or "").strip()
+        if name and not NAME_RE.match(name):
+            raise ValueError("name: up to 60 letters, digits, spaces or .,()/+#-")
+        entry = {"id": mid, "name": name or mid, "type": mtype, "driver": driver,
+                 "zone": self._check_zone(spec.get("zone")),
+                 "prints_dir": str(spec.get("prints_dir") or "prints")}
+        if driver == "simulated":
+            files = spec.get("files") or []
+            if isinstance(files, str):
+                files = [f.strip() for f in re.split(r"[,\n]", files)]
+            files = [f for f in files if f]
+            if not files or any(len(f) > 100 or "/" in f or "\\" in f for f in files):
+                raise ValueError("list at least one job file name (no folders), e.g. actuator_housing.gcode.3mf")
+            try:
+                seconds = float(spec.get("print_seconds") or 20)
+            except (TypeError, ValueError):
+                raise ValueError("cycle time must be a number of seconds") from None
+            entry.update(files=files[:50], print_seconds=max(1.0, min(seconds, 86_400.0)))
+        else:
+            printer = {k: str(spec.get(k) or "").strip() for k in ("ip", "serial", "access_code")}
+            missing = [k for k, v in printer.items() if not v]
+            if missing:
+                raise ValueError(f"Bambu Lab printers need {', '.join(missing)}")
+            try:
+                ipaddress.ip_address(printer["ip"])
+            except ValueError:
+                raise ValueError("ip must be an IP address, e.g. 192.168.1.50") from None
+            if not re.fullmatch(r"[A-Za-z0-9]{4,32}", printer["serial"]):
+                raise ValueError("serial: 4-32 letters and digits")
+            printer["use_ams"] = bool(spec.get("use_ams"))
+            entry.update(printer=printer, poll_seconds=10)
+        with self.lock:
+            if mid in self.machines:
+                raise ValueError(f"machine {mid} already exists")
+            try:
+                machine = build_machine(entry, self.base_dir, self.simulate_machines)
+            except (ImportError, MachineError, KeyError, OSError) as e:
+                raise ValueError(f"cannot connect {mid}: {e}") from e
+            self.machines[mid] = machine
+            self.machine_source[mid] = "dashboard"
+            self.registry["machines"].append(entry)
+            self._save_registry()
+            self._event("config", f"Machine {mid} ({entry['name']}, {driver}) added at {entry['zone']}")
+            return {k: v for k, v in entry.items() if k != "printer"}
+
+    def remove_machine(self, machine_id: str) -> dict:
+        with self.lock:
+            if machine_id not in self.machines:
+                raise KeyError(machine_id)
+            if self.machine_source.get(machine_id) == "file":
+                raise ValueError(f"{machine_id} is defined in the factory file; remove it there")
+            if any(j["machine_id"] == machine_id and j["status"] in ACTIVE_JOB for j in self.jobs.values()):
+                raise ValueError(f"{machine_id} has an active job")
+            machine = self.machines.pop(machine_id)
+            self.machine_source.pop(machine_id, None)
+            self.machine_history.pop(machine_id, None)
+            self.registry["machines"] = [m for m in self.registry["machines"] if m["id"] != machine_id]
+            self._save_registry()
+            self._event("config", f"Machine {machine_id} removed")
+            return {"id": machine.id, "zone": machine.zone}
+
+    # documents ---------------------------------------------------------------
+
+    def _documents_dir(self) -> Path:
+        if self.data_dir is None:
+            raise ValueError("document upload needs a data directory (robofleet factory serve --data-dir)")
+        return self.data_dir / "documents"
+
+    def add_document(self, name: str, data: bytes) -> dict:
+        """Stores a reference PDF (work instruction, drawing, SOP) that work orders can attach."""
+        folder = self._documents_dir()
+        if not data.startswith(b"%PDF-"):
+            raise ValueError("only PDF files are accepted")
+        if len(data) > MAX_DOCUMENT_BYTES:
+            raise ValueError(f"PDF is larger than {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB")
+        name = re.sub(r"[^\w .()-]", "_", Path(str(name or "document.pdf")).name).strip() or "document.pdf"
+        if not name.lower().endswith(".pdf"):
+            name += ".pdf"
+        with self.lock:
+            doc_id = self._free_ids("DOC", 1, self.documents)[0]
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{doc_id}.pdf").write_bytes(data)
+            doc = {"id": doc_id, "name": name[:120], "size": len(data), "uploaded": round(time.time(), 1)}
+            self.documents[doc_id] = doc
+            self._save_documents()
+            self._event("config", f"Document {doc_id} uploaded: {doc['name']}")
+            return dict(doc)
+
+    def document_path(self, doc_id: str) -> Path:
+        if doc_id not in self.documents:
+            raise KeyError(doc_id)
+        return self._documents_dir() / f"{doc_id}.pdf"
+
+    def remove_document(self, doc_id: str) -> dict:
+        with self.lock:
+            path = self.document_path(doc_id)
+            doc = self.documents.pop(doc_id)
+            path.unlink(missing_ok=True)
+            self._save_documents()
+            self._event("config", f"Document {doc_id} removed")
+            return doc
+
+    # persistence -------------------------------------------------------------
+
+    def _write_json(self, path: Path, data) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        os.chmod(tmp, 0o600)  # may hold printer access codes
+        tmp.replace(path)
+
+    def _save_registry(self) -> None:
+        if self.data_dir:
+            self._write_json(self.data_dir / "registry.json", self.registry)
+
+    def _save_documents(self) -> None:
+        if self.data_dir:
+            self._write_json(self._documents_dir() / "index.json", list(self.documents.values()))
+
+    def _load_registry(self) -> None:
+        path = self.data_dir / "registry.json"
+        docs = self._documents_dir() / "index.json"
+        if docs.exists():
+            self.documents = {d["id"]: d for d in json.loads(docs.read_text())}
+        if not path.exists():
+            return
+        saved = json.loads(path.read_text())
+        for name, pos in saved.get("zones", {}).items():
+            if name not in self.site["zones"]:
+                self.site["zones"][name] = pos
+                self.registry["zones"][name] = pos
+        for entry in saved.get("machines", []):
+            if entry["id"] in self.machines or entry.get("zone") not in self.site["zones"]:
+                continue
+            try:
+                self.machines[entry["id"]] = build_machine(entry, self.base_dir, self.simulate_machines)
+            except (ImportError, MachineError, KeyError, OSError) as e:
+                self._event("error", f"Machine {entry['id']} from the registry could not be loaded: {e}")
+                continue
+            self.machine_source[entry["id"]] = "dashboard"
+            self.registry["machines"].append(entry)
+        for entry in saved.get("robots", []):
+            if entry["id"] in self.robots:
+                continue
+            self._register_robot(entry, source="dashboard")
+            self.registry["robots"].append(entry)
+            if entry.get("connection") == "simulated":
+                self._start_simulated_robot(entry["id"], entry.get("home_zone"), entry.get("battery", 100))
+
+    # built-in simulated robots ----------------------------------------------
+
+    def _start_simulated_robot(self, robot_id: str, zone: str | None, battery: float) -> None:
+        from .robot_agent import RobotAgent, SimulatedExecutor
+
+        stop = threading.Event()
+        self._agents[robot_id] = stop
+        agent = RobotAgent(_LocalClient(self, robot_id, stop), robot_id, SimulatedExecutor(self.site["zones"], self.sim_speed_m_s, self.sim_handling_s),
+                           zone=zone, battery=battery, verbose=False)
+        threading.Thread(target=agent.run_forever, args=(stop,), daemon=True, name=f"sim-{robot_id}").start()
+
+    def stop_simulated_robots(self) -> None:
+        for stop in self._agents.values():
+            stop.set()
+
     # ------------------------------------------------------------------ view
 
+    def _note_machine_state(self, machine_id: str, state: str, now: float) -> None:
+        history = self.machine_history.setdefault(machine_id, [])
+        if not history or history[-1][1] != state:
+            history.append([round(now, 1), state])
+        while len(history) > 1 and history[1][0] < now - HISTORY_S:
+            history.pop(0)
+
     def state(self) -> dict:
-        machines = [m.describe() | {"files": m.list_files()} for m in self.machines.values()]
+        machines = []
+        for m in list(self.machines.values()):
+            info = m.describe() | {"files": m.list_files()}
+            info.update(name=m.spec.get("name") or m.id, driver=type(m).__name__,
+                        source=self.machine_source.get(m.id, "file"))
+            machines.append(info)
         with self.lock:
             now = time.time()
+            for info in machines:
+                self._note_machine_state(info["id"], info["state"], now)
             robots = [dict(r, active_tasks=self._active_tasks(r["id"]),
                            seen_s_ago=None if r["last_seen"] is None else round(now - r["last_seen"], 1))
                       for r in self.robots.values()]
             return {
+                "now": now,
                 "factory": {k: self.config.get(k) for k in ("name", "type", "default_output_zone")}
-                | {"require_confirmation": self.require_confirmation, "model": getattr(self.model, "model", None)},
+                | {"require_confirmation": self.require_confirmation, "model": getattr(self.model, "model", None),
+                   "dispatch": "model" if self.dispatch_with_model and self.model else "rules",
+                   "persistent": self.data_dir is not None},
                 "zones": self.site["zones"], "chargers": self.site["chargers"],
                 "machines": machines, "robots": robots,
+                "machine_history": {k: list(v) for k, v in self.machine_history.items() if k in self.machines},
+                "documents": sorted(self.documents.values(), key=lambda d: d["uploaded"], reverse=True),
+                "options": {"robot_kinds": sorted(ROBOT_KINDS), "connections": sorted(CONNECTIONS),
+                            "machine_types": sorted(MACHINE_TYPES), "drivers": sorted(DRIVERS),
+                            "priorities": sorted(PRIORITIES)},
                 "jobs": sorted(self.jobs.values(), key=lambda j: j["created"], reverse=True),
                 "tasks": sorted(self.tasks.values(), key=lambda t: t["created"], reverse=True),
-                "events": list(reversed(self.events[-50:])),
+                "events": list(reversed(self.events[-100:])),
             }
+
+
+class _LocalClient:
+    """Lets a built-in simulated robot talk to the factory directly instead of over HTTP."""
+
+    base_url = "built-in"
+
+    def __init__(self, factory: Factory, robot_id: str, stop: threading.Event):
+        self.factory, self.robot_id, self.stop = factory, robot_id, stop
+
+    def call(self, path: str, body: dict | None = None, timeout: float | None = None) -> dict:
+        try:
+            with self.factory.lock:
+                if self.stop.is_set():
+                    raise RuntimeError(f"{self.robot_id} was removed")
+                if path.endswith("/heartbeat"):
+                    return self.factory.heartbeat(self.robot_id, body or {})
+                match = re.fullmatch(r"/api/tasks/([\w.-]+)/complete", path)
+                if match:
+                    body = body or {}
+                    return self.factory.complete_task(match.group(1), self.robot_id, bool(body.get("ok", True)),
+                                                      str(body.get("note", "")))
+        except (KeyError, ValueError) as e:
+            raise RuntimeError(str(e)) from e
+        raise RuntimeError(f"unsupported call {path}")
+
+    def fetch_document(self, document: dict, folder=None) -> str:
+        return str(self.factory.document_path(document["id"]))
 
 
 def _keyword_choice(text: str, machines: list[dict], default_zone: str | None) -> dict:

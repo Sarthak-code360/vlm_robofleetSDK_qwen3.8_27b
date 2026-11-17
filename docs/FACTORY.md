@@ -53,8 +53,9 @@ robofleet factory request "print the actuator housing" --confirm
 robofleet factory status
 ```
 
-Open **http://localhost:8080** to watch the dashboard. You can also type requests there and press **Start** to
-confirm jobs.
+Open **http://localhost:8080** to watch the dashboard. You can also create work orders there and press
+**Review & Start** to approve jobs. Instead of `robofleet robot sim`, you can register digital-twin robots in the
+dashboard (Robot Fleet → Register Robot → Batch).
 
 ### 2. With Qwen as the brain
 
@@ -81,7 +82,7 @@ Set `"dispatch": "rules"` in the factory file to let only the requests go throug
    ```sh
    robofleet factory serve --config examples/actuator_factory/factory.json
    ```
-4. Request, check the bed is clear, then confirm (`robofleet factory confirm JOB-0001` or the dashboard's Start button).
+4. Request, check the bed is clear, then confirm (`robofleet factory confirm JOB-0001` or **Review & Start** in the dashboard).
 
 The factory watches the printer every 10 s (`poll_seconds`) and creates the collect task when it reports `FINISH`.
 
@@ -97,11 +98,40 @@ robofleet robot run --id RBT-001 --name "SO-101 arm" --zone "Assembly Table" \
   --exec 'bash real/run_fast.sh {instruction}'
 ```
 
-- Placeholders: `{instruction}`, `{from_zone}`, `{to_zone}`, `{task_id}`. Values are shell-quoted for you.
+- Placeholders: `{instruction}`, `{from_zone}`, `{to_zone}`, `{task_id}`, `{document}` (local path of the work
+  instruction PDF, or empty). Values are shell-quoted for you.
 - Exit code 0 means done, anything else means failed. The task's result shows in the dashboard.
 - Start the factory with `--host 0.0.0.0` so robots on the network can reach it, and set a token (see Security).
 - Simulated and real robots can run together. Any robot ID that sends a heartbeat joins the factory, even if it is
   not listed in the factory file.
+
+## Operations dashboard
+
+`robofleet factory serve` serves the dashboard at `http://<host>:8080/`.
+
+| Tab | What you can do |
+|---|---|
+| Overview | Gauges for fleet availability, machine utilization (last 60 min), delivery success and fleet energy; machine state timeline (last 15 min); fleet status; task queue; active work order; deliveries per 5 min; live floor map with robots, machines and routes. Jobs awaiting approval show as a banner. |
+| Work Orders | Create a work order: request text, delivery zone (or automatic), priority (normal or urgent), and an optional work instruction PDF. Approve (**Review & Start**, with a safety check) or cancel jobs. See every robot task and its result. |
+| Robot Fleet | Register a robot or a batch: ID, name, type (mobile manipulator, robotic arm, AMR, humanoid), model, home zone, payload, capabilities and connection. Remove robots added in the dashboard. |
+| Machines & Layout | Register machines: a simulated printer (job files, cycle time) or a Bambu Lab printer over LAN (IP, serial, access code, AMS, print files folder). Add zones with x/y positions. |
+| Documents | Upload and manage PDFs (max 25 MB). |
+| Activity Log | Every request, decision, dispatch and robot event, filterable by category. |
+
+**Robot connections.** A *digital twin* robot is simulated inside the server, which is good for demos and for
+planning. An *edge agent* is a real robot. Run the agent on or next to it; the dashboard shows the exact command:
+
+```sh
+robofleet robot run --server http://<factory-ip>:8080 --id RBT-011 --exec 'bash real/run_fast.sh {instruction}'
+```
+
+**Work instruction PDFs.** A PDF attached to a work order travels with the robot task. The agent downloads it to
+`~/.robofleet/documents/` before running the task, and `{document}` in the `--exec` command is its local path, for
+example `--exec 'python my_robot.py --task {instruction} --sop {document}'`. The model is told the document's name.
+
+**Saved data.** Robots, machines and zones added in the dashboard, and uploaded documents, are kept in `--data-dir`
+(default `data/`; it is git-ignored). Printer access codes are stored there (file mode 600) and never sent back to
+the browser. Robots and machines from the factory file are shown as *factory file* and can only be removed there.
 
 ## The factory file
 
@@ -148,24 +178,34 @@ entry in `DRIVERS`. The brain, checker, dispatch and dashboard work with it unch
 | Method and path | Body | Returns |
 |---|---|---|
 | `GET /` | | dashboard |
-| `GET /api/state` | | factory, zones, machines, robots, jobs, tasks, events |
-| `POST /api/requests` | `{"text": "print the actuator housing"}` | `{"ok", "summary", "job" or "task", "choice", "model"}` |
+| `GET /api/state` | | factory, zones, machines, robots, jobs, tasks, documents, machine history, events |
+| `POST /api/requests` | `{"text", "document_id"?, "deliver_to"?, "priority"?: "normal"\|"urgent"}` | `{"ok", "summary", "job" or "task", "choice", "model"}` |
 | `POST /api/jobs/<id>/confirm` | `{}` | the job |
+| `POST /api/jobs/<id>/cancel` | `{}` | the job (only while awaiting approval) |
+| `POST /api/robots` | `{"id"?, "name", "kind", "model", "home_zone", "payload_kg", "capabilities", "connection": "simulated"\|"agent", "battery", "count"}` | `{"robots": [...]}` |
+| `DELETE /api/robots/<id>` | | the robot |
 | `POST /api/robots/<id>/heartbeat` | `{"zone", "battery", "status": "idle"\|"busy"\|"charging"\|"fault", ...}` | `{"task": {...} or null, "messages": [...]}` |
 | `POST /api/tasks/<id>/complete` | `{"robot_id", "ok": true, "note": ""}` | the task |
+| `POST /api/machines` | `{"id", "name", "type", "driver": "simulated"\|"bambu", "zone", ...}` (simulated: `files`, `print_seconds`; bambu: `ip`, `serial`, `access_code`, `use_ams`, `prints_dir`) | the machine (without the access code) |
+| `DELETE /api/machines/<id>` | | the machine |
+| `POST /api/zones` | `{"name", "x", "y"}` | the zone |
+| `POST /api/documents` | raw PDF body, header `X-Filename` | `{"id", "name", "size", "uploaded"}` |
+| `GET /api/documents/<id>` | | the PDF (`?token=` works too) |
+| `DELETE /api/documents/<id>` | | the document |
 
 A task sent to a robot looks like this:
 
 ```json
 {"id": "TASK-0002", "type": "pick_and_place", "from_zone": "Print Bay", "to_zone": "Output Box",
- "instruction": "Collect the finished part 'actuator_housing.gcode.3mf' from PRINTER-1 at Print Bay and place it in Output Box.",
- "job_id": "JOB-0001", "battery_cost": 5}
+ "instruction": "Collect the finished part 'actuator_housing.gcode.3mf' from PRINTER-1 at Print Bay and place it in Output Box. Follow the work instruction 'Housing SOP.pdf'.",
+ "job_id": "JOB-0001", "priority": "normal", "battery_cost": 5,
+ "document": {"id": "DOC-001", "name": "Housing SOP.pdf", "url": "/api/documents/DOC-001"}}
 ```
 
 Each task is delivered once, in the next heartbeat after it is assigned. A robot that stops sending heartbeats loses
 the task to another robot after `robot_timeout_s`.
 
-Job states: `awaiting_confirmation` → `starting` → `running` → `done` → `delivered` (or `failed` / `delivery_failed`).
+Job states: `awaiting_confirmation` → `starting` → `running` → `done` → `delivered` (or `failed` / `delivery_failed` / `cancelled`).
 Task states: `pending` → `assigned` → `in_progress` → `done` (or `failed`).
 
 ## Python
@@ -174,8 +214,11 @@ Task states: `pending` → `assigned` → `in_progress` → `done` (or `failed`)
 from robofleet import ModelClient
 from robofleet.factory import load_factory, serve
 
-factory = load_factory("examples/actuator_factory/factory.json", ModelClient.from_env(), simulate_machines=True)
-result = factory.submit_request("print the actuator gear")
+factory = load_factory("examples/actuator_factory/factory.json", ModelClient.from_env(), simulate_machines=True,
+                       data_dir="data")
+factory.add_robots({"name": "Mobile Manipulator", "home_zone": "Robot Park", "connection": "simulated", "count": 5})
+doc = factory.add_document("Gear SOP.pdf", open("gear_sop.pdf", "rb").read())
+result = factory.submit_request("print the actuator gear", document_id=doc["id"], priority="urgent")
 factory.confirm_job(result["job"]["id"])
 serve(factory, host="0.0.0.0", port=8080, token="change-me")
 ```

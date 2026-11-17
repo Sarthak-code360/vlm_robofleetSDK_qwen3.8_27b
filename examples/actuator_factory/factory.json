@@ -1,7 +1,7 @@
 {
   "_comment": "Describe your factory here: zones (metres), machines and robots. Machine paths are relative to this file.",
-  "name": "Actuator Factory Demo",
-  "type": "3D printed actuator manufacturing factory",
+  "name": "Actuator Manufacturing Cell",
+  "type": "3D-printed actuator manufacturing facility",
   "zones": {
     "Print Bay": {
       "x": 0,
@@ -55,59 +55,81 @@
         "actuator_housing.gcode.3mf",
         "actuator_gear.gcode.3mf",
         "actuator_cap.gcode.3mf"
-      ]
+      ],
+      "name": "Bambu Lab A1"
     }
   ],
   "robots": [
     {
       "id": "RBT-001",
-      "name": "SO-101 arm",
-      "home_zone": "Robot Park"
+      "name": "SO-101 Robotic Arm",
+      "kind": "robotic_arm",
+      "model": "SO-101",
+      "home_zone": "Robot Park",
+      "payload_kg": 0.2
     },
     {
       "id": "RBT-002",
-      "name": "Robot 2",
-      "home_zone": "Robot Park"
+      "name": "Mobile Manipulator 02",
+      "kind": "mobile_manipulator",
+      "home_zone": "Robot Park",
+      "payload_kg": 5
     },
     {
       "id": "RBT-003",
-      "name": "Robot 3",
-      "home_zone": "Robot Park"
+      "name": "Mobile Manipulator 03",
+      "kind": "mobile_manipulator",
+      "home_zone": "Robot Park",
+      "payload_kg": 5
     },
     {
       "id": "RBT-004",
-      "name": "Robot 4",
-      "home_zone": "Assembly Table"
+      "name": "Mobile Manipulator 04",
+      "kind": "mobile_manipulator",
+      "home_zone": "Assembly Table",
+      "payload_kg": 5
     },
     {
       "id": "RBT-005",
-      "name": "Robot 5",
-      "home_zone": "Assembly Table"
+      "name": "Mobile Manipulator 05",
+      "kind": "mobile_manipulator",
+      "home_zone": "Assembly Table",
+      "payload_kg": 5
     },
     {
       "id": "RBT-006",
-      "name": "Robot 6",
-      "home_zone": "Raw Material Store"
+      "name": "Mobile Manipulator 06",
+      "kind": "mobile_manipulator",
+      "home_zone": "Raw Material Store",
+      "payload_kg": 5
     },
     {
       "id": "RBT-007",
-      "name": "Robot 7",
-      "home_zone": "Raw Material Store"
+      "name": "Mobile Manipulator 07",
+      "kind": "mobile_manipulator",
+      "home_zone": "Raw Material Store",
+      "payload_kg": 5
     },
     {
       "id": "RBT-008",
-      "name": "Robot 8",
-      "home_zone": "Charging Dock"
+      "name": "Mobile Manipulator 08",
+      "kind": "mobile_manipulator",
+      "home_zone": "Charging Dock",
+      "payload_kg": 5
     },
     {
       "id": "RBT-009",
-      "name": "Robot 9",
-      "home_zone": "Output Box"
+      "name": "Mobile Manipulator 09",
+      "kind": "mobile_manipulator",
+      "home_zone": "Output Box",
+      "payload_kg": 5
     },
     {
       "id": "RBT-010",
-      "name": "Robot 10",
-      "home_zone": "Output Box"
+      "name": "Mobile Manipulator 10",
+      "kind": "mobile_manipulator",
+      "home_zone": "Output Box",
+      "payload_kg": 5
     }
   ]
 }

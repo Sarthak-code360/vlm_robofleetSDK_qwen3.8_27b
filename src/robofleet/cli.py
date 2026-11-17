@@ -4,6 +4,7 @@ Autonomous factory:
   robofleet factory serve --config examples/actuator_factory/factory.json [--simulate-machines]
   robofleet robot sim --count 10                 # 10 simulated robots
   robofleet robot run --id RBT-001 --exec 'bash real/run_fast.sh {instruction}'   # a real robot
+  (robots, machines, zones and work instruction PDFs can also be added in the dashboard)
   robofleet factory request "print the actuator housing"
   robofleet factory confirm JOB-0001
   robofleet factory status
@@ -167,7 +168,8 @@ def cmd_factory_serve(args) -> None:
 
     model = None if args.offline else ModelClient.from_env()
     try:
-        factory = load_factory(args.config, model, simulate_machines=args.simulate_machines, log_path=args.log)
+        factory = load_factory(args.config, model, simulate_machines=args.simulate_machines, log_path=args.log,
+                               data_dir=args.data_dir)
     except (ValueError, FileNotFoundError, KeyError) as e:
         _stop(str(e))
     except ImportError as e:
@@ -177,7 +179,8 @@ def cmd_factory_serve(args) -> None:
     print(f"  dashboard: {where}/" + (f"#token={args.token}" if args.token else ""))
     print(f"  model:     {model.model + ' at ' + model.base_url if model else 'none (keywords + rules)'}")
     print(f"  machines:  {', '.join(f'{m.id} ({type(m).__name__})' for m in factory.machines.values())}")
-    print(f"  robots:    {len(factory.robots)} configured; they appear online when they send heartbeats")
+    print(f"  robots:    {len(factory.robots)} registered; agent robots appear online when they send heartbeats")
+    print(f"  data:      {args.data_dir} (robots, machines, zones and documents added in the dashboard)")
     print(f"  events:    {args.log}\nCtrl+C to stop.", flush=True)
     serve(factory, args.host, args.port, args.token)
 
@@ -291,6 +294,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--port", type=int, default=8080)
     sp.add_argument("--token", default=os.environ.get("ROBOFLEET_TOKEN"), help="require this API token")
     sp.add_argument("--log", type=Path, default=Path("logs/factory_events.jsonl"))
+    sp.add_argument("--data-dir", type=Path, default=Path("data"),
+                    help="where dashboard-added robots, machines, zones and documents are kept (default: data)")
     sp.set_defaults(func=cmd_factory_serve)
 
     sp = with_server(fsub.add_parser("request", help="ask the factory to do something"))

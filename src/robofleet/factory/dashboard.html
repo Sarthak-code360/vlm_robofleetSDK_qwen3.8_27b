@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboFleet Operations Center</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#0b0c0f;--panel:#16181d;--panel-2:#1c1f25;--line:#262a31;--line-2:#323741;
+  --text:#d9dce1;--strong:#f3f4f6;--muted:#8b919c;--faint:#5c626d;
+  --green:#73bf69;--yellow:#f2cc0c;--orange:#ff9830;--red:#f2495c;--blue:#5794f2;--purple:#b877d9;--cyan:#4fc3c7;
+  --accent:#5794f2;--radius:6px;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+*{scrollbar-color:#323741 transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+
+/* ---------- top bar ---------- */
+.topbar{position:sticky;top:0;z-index:20;background:rgba(11,12,15,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar-inner{display:flex;align-items:center;gap:16px;padding:10px 20px;max-width:1680px;margin:0 auto}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand-mark{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#f2cc0c 0%,#ff9830 55%,#f2495c 100%);display:grid;place-items:center;flex:none}
+.brand-mark svg{width:18px;height:18px}
+.brand-text{min-width:0}
+.brand-title{font-weight:600;color:var(--strong);font-size:14px;letter-spacing:.01em;white-space:nowrap}
+.brand-sub{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--line-2);border-radius:99px;color:var(--muted);font-size:12px;white-space:nowrap}
+.chip b{color:var(--text);font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot.live{background:var(--green);box-shadow:0 0 0 3px rgba(115,191,105,.18)}
+.dot.down{background:var(--red);box-shadow:0 0 0 3px rgba(242,73,92,.18)}
+.clock{font-family:var(--mono);color:var(--muted);font-size:12px}
+.tabs{display:flex;gap:2px;padding:0 20px;max-width:1680px;margin:0 auto;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:9px 14px;color:var(--muted);cursor:pointer;white-space:nowrap;font-weight:500}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--strong);border-bottom-color:var(--orange)}
+.tab .count{display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;border-radius:9px;background:var(--orange);color:#111;font-size:11px;font-weight:700;text-align:center}
+
+/* ---------- layout ---------- */
+main{max-width:1680px;margin:0 auto;padding:16px 20px 40px}
+.view{display:none}.view.active{display:block}
+.grid{display:grid;gap:12px}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.g-ov{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,2.2fr)}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g-orders{grid-template-columns:minmax(320px,1fr) minmax(0,2.2fr)}
+@media (max-width:1100px){.g-orders{grid-template-columns:minmax(0,1fr)}}
+.stack{display:grid;gap:12px;align-content:start}
+.mt{margin-top:12px}
+@media (max-width:1200px){.g-ov{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}.g-ov>.map-panel{grid-column:1/-1}}
+@media (max-width:900px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g-ov,.g2{grid-template-columns:minmax(0,1fr)}.brand-sub,.hide-sm{display:none}}
+@media (max-width:520px){.g4{grid-template-columns:minmax(0,1fr)}.topbar-inner,main,.tabs{padding-left:16px;padding-right:16px}}
+
+/* ---------- panels ---------- */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;min-width:0;position:relative}
+.panel-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:22px}
+.panel-title{font-weight:600;color:var(--strong);font-size:13.5px}
+.panel-hint{color:var(--muted);font-size:12px}
+.panel-head .actions{margin-left:auto;display:flex;gap:8px}
+.empty{color:var(--faint);padding:18px 0;text-align:center}
+.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}.faint{color:var(--faint)}
+
+/* gauges */
+.gauge{display:block;width:100%;max-width:280px;margin:0 auto}
+.gauge-foot{text-align:center;color:var(--muted);font-size:12px;margin-top:-4px}
+
+/* timeline */
+.tl-row{display:grid;grid-template-columns:200px minmax(0,1fr);align-items:center;gap:12px;margin-bottom:8px}
+.tl-label{min-width:0}
+.tl-label b{display:block;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-label span{color:var(--muted);font-size:11.5px;font-family:var(--mono)}
+.tl-track{position:relative;height:30px;background:var(--panel-2);border-radius:3px;overflow:hidden}
+.tl-seg{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#111;overflow:hidden;white-space:nowrap;border-right:1px solid rgba(0,0,0,.25)}
+.tl-axis{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px}
+.tl-ticks{position:relative;height:18px;color:var(--muted);font-family:var(--mono);font-size:11.5px}
+.tl-ticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.tl-ticks span:first-child{transform:none}.tl-ticks span:last-child{transform:translateX(-100%)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;color:var(--muted);font-size:12px}
+.legend i{display:inline-block;width:12px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
+@media (max-width:640px){.tl-row,.tl-axis{grid-template-columns:110px minmax(0,1fr)}}
+
+/* stat */
+.big-id{font-family:var(--mono);font-size:20px;color:var(--strong);letter-spacing:.01em;word-break:break-all}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;margin-top:10px;font-size:12.5px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.progress{height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden;margin-top:10px}
+.progress>i{display:block;height:100%;background:var(--green);transition:width .6s}
+.stat-num{font-size:34px;font-weight:600;line-height:1.1;color:var(--strong)}
+
+/* map */
+.map{width:100%;height:auto;display:block;background:#101216;border-radius:4px}
+@keyframes dash{to{stroke-dashoffset:-20}}
+.route{animation:dash 1s linear infinite}
+
+/* tables */
+.table-wrap{overflow-x:auto;margin:0 -14px;padding:0 14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-weight:500;color:var(--muted);padding:7px 10px;border-bottom:1px solid var(--line-2);white-space:nowrap;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}
+td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:rgba(255,255,255,.02)}
+td.wrap{white-space:normal;min-width:240px}
+.id{font-family:var(--mono);color:var(--strong)}
+.sub-line{display:block;color:var(--muted);font-size:11.5px}
+
+/* status badges */
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:500;white-space:nowrap;background:rgba(139,145,156,.12);color:var(--muted)}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.s-green{color:var(--green);background:rgba(115,191,105,.12)}
+.s-yellow{color:var(--yellow);background:rgba(242,204,12,.12)}
+.s-orange{color:var(--orange);background:rgba(255,152,48,.12)}
+.s-red{color:var(--red);background:rgba(242,73,92,.12)}
+.s-blue{color:var(--blue);background:rgba(87,148,242,.12)}
+.s-purple{color:var(--purple);background:rgba(184,119,217,.12)}
+.s-grey{color:var(--muted);background:rgba(139,145,156,.12)}
+.s-cyan{color:var(--cyan);background:rgba(79,195,199,.12)}
+td.act{text-align:right}td.act .btn+.btn{margin-left:6px}
+.tag{display:inline-block;padding:1px 7px;border-radius:3px;background:var(--panel-2);border:1px solid var(--line-2);color:var(--muted);font-size:11.5px}
+.battery{display:inline-flex;align-items:center;gap:8px}
+.battery i{display:block;width:46px;height:6px;border-radius:3px;background:var(--panel-2);overflow:hidden}
+.battery i b{display:block;height:100%}
+
+/* buttons & forms */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:4px;border:1px solid var(--line-2);background:var(--panel-2);color:var(--text);cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:#4a505c;background:#23272e}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#6ba1f5}
+.btn.go{background:#2f7d32;border-color:#3f9a43;color:#fff}.btn.go:hover{background:#3a8d3e}
+.btn.danger{color:var(--red)}.btn.danger:hover{border-color:var(--red)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn svg{width:14px;height:14px}
+label.field{display:grid;gap:5px;min-width:0}
+label.field>span{color:var(--muted);font-size:12px;font-weight:500}
+label.field>small{color:var(--faint);font-size:11.5px}
+input[type=text],input[type=number],input[type=password],select,textarea{width:100%;padding:8px 10px;border-radius:4px;border:1px solid var(--line-2);background:#0f1115;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(87,148,242,.2)}
+textarea{resize:vertical;min-height:84px}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.form-grid .full{grid-column:1/-1}
+@media (max-width:640px){.form-grid{grid-template-columns:minmax(0,1fr)}}
+.check{display:flex;gap:9px;align-items:flex-start;color:var(--text)}
+.check input{margin-top:3px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:4px;overflow:hidden}
+.seg button{border:0;background:none;padding:6px 12px;color:var(--muted);cursor:pointer}
+.seg button.on{background:var(--panel-2);color:var(--strong)}
+.drop{display:block;border:1px dashed var(--line-2);border-radius:6px;padding:18px;text-align:center;color:var(--muted);cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:rgba(87,148,242,.05)}
+.drop b{color:var(--text)}
+.notice{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:var(--radius);border:1px solid rgba(255,152,48,.35);background:rgba(255,152,48,.07);margin-bottom:12px}
+.notice .txt{flex:1;min-width:0}
+.result{padding:10px 12px;border-radius:4px;background:var(--panel-2);border-left:3px solid var(--line-2);margin-top:12px;font-size:12.5px}
+.result.ok{border-left-color:var(--green)}.result.bad{border-left-color:var(--red)}
+pre.cmd{margin:8px 0 0;padding:10px 12px;background:#0f1115;border:1px solid var(--line-2);border-radius:4px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-all;color:var(--strong)}
+.filters{display:flex;flex-wrap:wrap;gap:6px}
+.filters button{border:1px solid var(--line-2);background:none;border-radius:99px;padding:3px 11px;color:var(--muted);cursor:pointer;font-size:12px}
+.filters button.on{border-color:var(--accent);color:var(--strong);background:rgba(87,148,242,.1)}
+.machine-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rot .8s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* dialog */
+dialog{border:1px solid var(--line-2);border-radius:8px;background:var(--panel);color:var(--text);padding:0;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 40px)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.dlg-head{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dlg-head h3{margin:0;font-size:15px;color:var(--strong);font-weight:600}
+.dlg-head .x{margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;cursor:pointer;line-height:1}
+.dlg-body{padding:16px 18px;overflow:auto;max-height:calc(100vh - 170px)}
+.dlg-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
+
+/* toasts */
+#toasts{position:fixed;right:16px;bottom:16px;display:grid;gap:8px;z-index:50;max-width:min(420px,calc(100vw - 32px))}
+.toast{padding:10px 14px;border-radius:5px;background:#22262d;border:1px solid var(--line-2);border-left:3px solid var(--blue);box-shadow:0 8px 24px rgba(0,0,0,.4);font-size:12.5px}
+.toast.ok{border-left-color:var(--green)}.toast.bad{border-left-color:var(--red)}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M12 8V4M9 13h.01M15 13h.01M3 13h2M19 13h2"/></svg></div>
+      <div class="brand-text">
+        <div class="brand-title">RoboFleet Operations Center</div>
+        <div class="brand-sub" id="site-sub">Connecting…</div>
+      </div>
+    </div>
+    <div class="top-right">
+      <span class="chip hide-sm" id="chip-model">Orchestrator <b>—</b></span>
+      <span class="chip"><span class="dot" id="live-dot"></span><span id="live-text">Connecting</span></span>
+      <span class="clock hide-sm" id="clock"></span>
+      <button class="btn primary" data-action="new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="orders">Work Orders<span class="count" id="count-approvals" hidden></span></button>
+    <button class="tab" data-tab="fleet">Robot Fleet</button>
+    <button class="tab" data-tab="machines">Machines &amp; Layout</button>
+    <button class="tab" data-tab="documents">Documents</button>
+    <button class="tab" data-tab="activity">Activity Log</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ================= OVERVIEW ================= -->
+  <section class="view active" id="view-overview">
+    <div id="approval-banner"></div>
+    <div class="grid g4">
+      <div class="panel"><div class="panel-head"><span class="panel-title">Fleet Availability</span></div><div id="g-avail"></div><div class="gauge-foot" id="g-avail-foot"></div></div>
+      <div class="panel"><div class="panel-head"><span class="panel-title">Machine Utilization</span><span class="panel-hint">last 60 min</span></div><div id="g-util"></div><div class="gauge-foot" id="g-util-foot"></div></div>
+      <div class="panel"><div class="panel-head"><span class="panel-title">Delivery Success Rate</span></div><div id="g-success"></div><div class="gauge-foot" id="g-success-foot"></div></div>
+      <div class="panel"><div class="panel-head"><span class="panel-title">Fleet Energy Level</span></div><div id="g-energy"></div><div class="gauge-foot" id="g-energy-foot"></div></div>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><span class="panel-title">Machine State</span><span class="panel-hint">last 15 min</span>
+        <div class="actions legend" id="tl-legend"></div></div>
+      <div id="timeline"></div>
+    </div>
+
+    <div class="grid g-ov mt">
+      <div class="stack">
+        <div class="panel"><div class="panel-head"><span class="panel-title">Fleet Status</span></div><div id="donut"></div></div>
+        <div class="panel"><div class="panel-head"><span class="panel-title">Task Queue</span></div><div id="queue-stat"></div></div>
+      </div>
+      <div class="stack">
+        <div class="panel"><div class="panel-head"><span class="panel-title">Active Work Order</span></div><div id="active-order"></div></div>
+        <div class="panel"><div class="panel-head"><span class="panel-title">Deliveries</span><span class="panel-hint">per 5 min, last 60 min</span></div><div id="throughput"></div></div>
+      </div>
+      <div class="panel map-panel">
+        <div class="panel-head"><span class="panel-title">Floor Map</span><span class="panel-hint">live robot positions &amp; routes</span>
+          <div class="actions legend" id="map-legend"></div></div>
+        <div id="floormap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= WORK ORDERS ================= -->
+  <section class="view" id="view-orders">
+    <div class="grid g-orders">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Create Work Order</span></div>
+        <form id="order-form" class="stack" autocomplete="off"></form>
+        <div id="order-result"></div>
+      </div>
+      <div class="stack">
+        <div class="panel"><div class="panel-head"><span class="panel-title">Production Jobs</span><span class="panel-hint" id="jobs-hint"></span></div><div class="table-wrap" id="jobs-table"></div></div>
+        <div class="panel"><div class="panel-head"><span class="panel-title">Robot Tasks</span><span class="panel-hint" id="tasks-hint"></span></div><div class="table-wrap" id="tasks-table"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FLEET ================= -->
+  <section class="view" id="view-fleet">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">Robot Fleet</span><span class="panel-hint" id="fleet-hint"></span>
+        <div class="actions"><button class="btn primary" data-action="add-robot">Register Robot</button></div></div>
+      <div class="table-wrap" id="fleet-table"></div>
+    </div>
+  </section>
+
+  <!-- ================= MACHINES ================= -->
+  <section class="view" id="view-machines">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">Production Machines</span><span class="panel-hint" id="machines-hint"></span>
+        <div class="actions"><button class="btn primary" data-action="add-machine">Register Machine</button></div></div>
+      <div class="machine-cards" id="machine-cards"></div>
+    </div>
+    <div class="panel mt">
+      <div class="panel-head"><span class="panel-title">Facility Zones</span><span class="panel-hint">positions in metres</span>
+        <div class="actions"><button class="btn" data-action="add-zone">Add Zone</button></div></div>
+      <div class="table-wrap" id="zones-table"></div>
+    </div>
+  </section>
+
+  <!-- ================= DOCUMENTS ================= -->
+  <section class="view" id="view-documents">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">Work Instructions &amp; Reference Documents</span>
+        <span class="panel-hint">PDFs attached to work orders are sent to the assigned robot</span></div>
+      <label class="drop" id="doc-drop"><input type="file" accept="application/pdf,.pdf" id="doc-file" hidden>
+        <b>Upload PDF</b> &nbsp;·&nbsp; click or drop a file here (max 25 MB)</label>
+      <div class="table-wrap mt" id="docs-table"></div>
+    </div>
+  </section>
+
+  <!-- ================= ACTIVITY ================= -->
+  <section class="view" id="view-activity">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">Activity Log</span><div class="actions filters" id="ev-filters"></div></div>
+      <div class="table-wrap" id="events-table"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg"><form method="dialog" id="dlg-form" autocomplete="off">
+  <div class="dlg-head"><h3 id="dlg-title"></h3><button class="x" value="cancel" formnovalidate aria-label="Close">×</button></div>
+  <div class="dlg-body" id="dlg-body"></div>
+  <div class="dlg-foot" id="dlg-foot"></div>
+</form></dialog>
+<div id="toasts"></div>
+
+<script>
+"use strict";
+/* ------------------------------------------------------------------ basics */
+const $ = s => document.querySelector(s);
+const token = decodeURIComponent((location.hash.match(/token=([^&]+)/) || [])[1] || "");
+const AUTH = token ? {"Authorization": "Bearer " + token} : {};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = ts => ts ? new Date(ts * 1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "";
+const fmtShort = ts => new Date(ts * 1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+const ago = s => s == null ? "never" : s < 60 ? Math.round(s) + "s ago" : s < 3600 ? Math.round(s / 60) + "m ago" : Math.round(s / 3600) + "h ago";
+const docUrl = id => `/api/documents/${encodeURIComponent(id)}` + (token ? `?token=${encodeURIComponent(token)}` : "");
+const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+async function api(path, {method, body, raw, headers} = {}) {
+  const opts = {method: method || (body !== undefined || raw ? "POST" : "GET"), headers: {...AUTH, ...(headers || {})}};
+  if (raw) opts.body = raw;
+  else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+function toast(text, kind = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + kind; el.textContent = text;
+  $("#toasts").appendChild(el); setTimeout(() => el.remove(), kind === "bad" ? 8000 : 4500);
+}
+
+/* ------------------------------------------------------------------ vocabulary */
+const COLORS = {green:"#73bf69", yellow:"#f2cc0c", orange:"#ff9830", red:"#f2495c", blue:"#5794f2", purple:"#b877d9", grey:"#5c626d", cyan:"#4fc3c7"};
+const LABELS = {
+  robot:   {idle:["Available","green"], busy:["Working","blue"], charging:["Charging","yellow"], fault:["Fault","red"], offline:["Offline","grey"]},
+  machine: {idle:["Idle","blue"], busy:["Running","green"], offline:["Offline","grey"], error:["Fault","red"]},
+  job:     {awaiting_confirmation:["Awaiting Approval","orange"], starting:["Starting","yellow"], running:["In Production","blue"],
+            done:["Ready for Pickup","purple"], delivered:["Delivered","green"], failed:["Failed","red"],
+            delivery_failed:["Delivery Failed","red"], cancelled:["Cancelled","grey"]},
+  task:    {pending:["Queued","yellow"], assigned:["Assigned","purple"], in_progress:["In Progress","blue"], done:["Completed","green"], failed:["Failed","red"]},
+};
+const KINDS = {mobile_manipulator:"Mobile Manipulator", robotic_arm:"Robotic Arm", amr:"Autonomous Mobile Robot", humanoid:"Humanoid", other:"Other"};
+const MTYPES = {"3d_printer":"3D Printer"};
+const DRIVERS = {simulated:"Simulated (digital twin)", bambu:"Bambu Lab (LAN)"};
+const DRIVER_CLASS = {SimulatedPrinter:"Digital twin", BambuMachine:"Bambu Lab LAN"};
+const badge = (group, s) => { const [t, c] = LABELS[group][s] || [s, "grey"]; return `<span class="badge s-${c}">${esc(t)}</span>`; };
+const colorOf = (group, s) => COLORS[(LABELS[group][s] || [0, "grey"])[1]];
+
+/* ------------------------------------------------------------------ state */
+let S = null, tab = (location.hash.match(/tab=(\w+)/) || [])[1] || store.get("rf.tab") || "overview", evFilter = "all", busy = false;
+const ONLINE = new Set(["idle", "busy", "charging"]);
+
+async function refresh() {
+  if (busy) return; busy = true;
+  try {
+    S = await api("/api/state");
+    $("#live-dot").className = "dot live"; $("#live-text").textContent = "Live";
+    render();
+  } catch (e) {
+    $("#live-dot").className = "dot down"; $("#live-text").textContent = e.message.includes("token") ? "Unauthorized" : "Disconnected";
+  } finally { busy = false; }
+}
+function render() {
+  const f = S.factory;
+  $("#site-sub").textContent = `${f.name || "Facility"} · ${f.type || ""}`;
+  $("#chip-model").innerHTML = `Orchestrator <b>${esc(f.model || "Rule engine")}</b> · Dispatch <b>${f.dispatch === "model" ? "AI" : "Rules"}</b>`;
+  const pending = S.jobs.filter(j => j.status === "awaiting_confirmation");
+  const c = $("#count-approvals"); c.hidden = !pending.length; c.textContent = pending.length;
+  ({overview: renderOverview, orders: renderOrders, fleet: renderFleet, machines: renderMachines,
+    documents: renderDocuments, activity: renderActivity})[tab]();
+}
+function setTab(t) {
+  tab = t; store.set("rf.tab", t);
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === t));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + t));
+  if (t === "orders") buildOrderForm();
+  if (S) render();
+}
+
+/* ------------------------------------------------------------------ charts */
+function polar(cx, cy, r, deg) { const a = deg * Math.PI / 180; return [cx + r * Math.sin(a), cy - r * Math.cos(a)]; }
+function arc(cx, cy, r, a0, a1) {
+  const [x0, y0] = polar(cx, cy, r, a0), [x1, y1] = polar(cx, cy, r, a1);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+function gauge(value, steps) {
+  // steps: [[from, color], ...] ascending; sweep -120°..120°
+  const A0 = -120, SW = 240, cx = 110, cy = 100;
+  const at = v => A0 + SW * Math.max(0, Math.min(100, v)) / 100;
+  let ring = "";
+  steps.forEach(([from, col], i) => {
+    const to = i + 1 < steps.length ? steps[i + 1][0] : 100;
+    ring += `<path d="${arc(cx, cy, 86, at(from) + (i ? 0.6 : 0), at(to))}" stroke="${COLORS[col]}" stroke-width="4" fill="none"/>`;
+  });
+  const has = value != null && !isNaN(value);
+  const col = has ? COLORS[[...steps].reverse().find(([from]) => value >= from)[1]] : COLORS.grey;
+  const val = has && value > 0 ? `<path d="${arc(cx, cy, 68, A0, at(value))}" stroke="${col}" stroke-width="24" fill="none"/>` : "";
+  return `<svg class="gauge" viewBox="0 0 220 160" role="img" aria-label="${has ? value.toFixed(1) + '%' : 'no data'}">
+    ${ring}<path d="${arc(cx, cy, 68, A0, A0 + SW)}" stroke="#23262c" stroke-width="24" fill="none"/>${val}
+    <text x="${cx}" y="${cy + 22}" text-anchor="middle" font-size="27" font-weight="500" fill="${col}" font-family="Inter,system-ui,sans-serif">${has ? value.toFixed(1) + "%" : "—"}</text></svg>`;
+}
+function donut(parts) {
+  const total = parts.reduce((a, p) => a + p.n, 0);
+  const R = 52, C = 2 * Math.PI * R; let off = 0, segs = "";
+  if (total) parts.filter(p => p.n).forEach(p => {
+    const len = C * p.n / total;
+    segs += `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${p.color}" stroke-width="20" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"><title>${esc(p.label)}: ${p.n}</title></circle>`;
+    off += len;
+  });
+  else segs = `<circle r="${R}" cx="70" cy="70" fill="none" stroke="#23262c" stroke-width="20"/>`;
+  return `<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+    <svg viewBox="0 0 140 140" style="width:140px;flex:none">${segs}
+      <text x="70" y="68" text-anchor="middle" font-size="26" font-weight="600" fill="#f3f4f6">${total}</text>
+      <text x="70" y="88" text-anchor="middle" font-size="11" fill="#8b919c">robots</text></svg>
+    <div class="legend" style="flex-direction:column;gap:6px">${parts.map(p =>
+      `<span><i style="background:${p.color}"></i>${esc(p.label)} <b style="color:var(--text);margin-left:4px">${p.n}</b></span>`).join("")}</div></div>`;
+}
+function bars(values, labels) {
+  const W = 420, H = 150, L = 26, B = 22, max = Math.max(1, ...values), bw = (W - L) / values.length;
+  const step = max <= 5 ? 1 : Math.ceil(max / 4);
+  let grid = "", out = "";
+  for (let v = 0; v <= max; v += step) {
+    const y = H - B - (H - B - 8) * v / max;
+    grid += `<line x1="${L}" x2="${W}" y1="${y}" y2="${y}" stroke="#23262c"/><text x="${L - 6}" y="${y + 4}" text-anchor="end" font-size="10.5" fill="#8b919c">${v}</text>`;
+  }
+  values.forEach((v, i) => {
+    const h = (H - B - 8) * v / max, x = L + i * bw + 3;
+    if (v) out += `<rect x="${x}" y="${H - B - h}" width="${bw - 6}" height="${h}" fill="${COLORS.green}" rx="1"><title>${labels[i]}: ${v}</title></rect>`;
+    if (i % 3 === 0) out += `<text x="${x + (bw - 6) / 2}" y="${H - 6}" text-anchor="middle" font-size="10.5" fill="#8b919c">${labels[i]}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">${grid}${out}</svg>`;
+}
+
+/* ------------------------------------------------------------------ overview */
+function utilization() {
+  const end = S.now, start = end - 3600; let busyT = 0, total = 0;
+  for (const m of S.machines) {
+    const h = S.machine_history[m.id] || [];
+    for (let i = 0; i < h.length; i++) {
+      const a = Math.max(h[i][0], start), b = i + 1 < h.length ? h[i + 1][0] : end;
+      if (b <= a) continue;
+      total += b - a; if (h[i][1] === "busy") busyT += b - a;
+    }
+  }
+  return total > 5 ? 100 * busyT / total : null;
+}
+function renderOverview() {
+  const R = S.robots, online = R.filter(r => ONLINE.has(r.status));
+  $("#g-avail").innerHTML = gauge(R.length ? 100 * online.length / R.length : null, [[0,"red"],[50,"yellow"],[80,"green"]]);
+  $("#g-avail-foot").textContent = `${online.length} of ${R.length} robots online`;
+  const u = utilization();
+  $("#g-util").innerHTML = gauge(u, [[0,"red"],[30,"yellow"],[60,"green"]]);
+  $("#g-util-foot").textContent = `${S.machines.filter(m => m.state === "busy").length} of ${S.machines.length} machines running`;
+  const done = S.tasks.filter(t => t.status === "done").length, failed = S.tasks.filter(t => t.status === "failed").length;
+  $("#g-success").innerHTML = gauge(done + failed ? 100 * done / (done + failed) : null, [[0,"red"],[80,"yellow"],[95,"green"]]);
+  $("#g-success-foot").textContent = done + failed ? `${done} delivered · ${failed} failed` : "No deliveries yet";
+  const avgB = online.length ? online.reduce((a, r) => a + r.battery, 0) / online.length : null;
+  $("#g-energy").innerHTML = gauge(avgB, [[0,"red"],[25,"yellow"],[50,"green"]]);
+  $("#g-energy-foot").textContent = online.length ? `Average battery · ${online.filter(r => r.battery < 25).length} low` : "No robots online";
+
+  // approvals banner
+  const pend = S.jobs.filter(j => j.status === "awaiting_confirmation");
+  $("#approval-banner").innerHTML = pend.map(j => `<div class="notice"><span class="badge s-orange">Approval required</span>
+    <div class="txt"><span class="id">${esc(j.id)}</span> &nbsp;${esc(machineName(j.machine_id))} will produce <span class="mono">${esc(j.file)}</span> → ${esc(j.deliver_to)}</div>
+    <button class="btn sm danger" data-action="cancel-job" data-id="${esc(j.id)}">Cancel</button>
+    <button class="btn sm go" data-action="approve-job" data-id="${esc(j.id)}">Review &amp; Start</button></div>`).join("");
+
+  renderTimeline();
+  const parts = Object.entries(LABELS.robot).map(([k, [label, c]]) => ({label, color: COLORS[c], n: R.filter(r => r.status === k).length}));
+  $("#donut").innerHTML = donut(parts);
+
+  const q = s => S.tasks.filter(t => t.status === s).length;
+  $("#queue-stat").innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
+    <div><div class="stat-num" style="color:var(--yellow)">${q("pending")}</div><div class="muted">Queued</div></div>
+    <div><div class="stat-num" style="color:var(--blue)">${q("assigned") + q("in_progress")}</div><div class="muted">In progress</div></div>
+    <div><div class="stat-num" style="color:var(--green)">${q("done")}</div><div class="muted">Completed</div></div></div>`;
+
+  const rank = ["running", "starting", "done", "awaiting_confirmation"];
+  const active = rank.map(st => S.jobs.find(j => j.status === st)).find(Boolean) || S.jobs[0];
+  if (!active) $("#active-order").innerHTML = `<div class="empty">No work orders yet.<br><button class="btn primary mt" data-action="new-order">Create Work Order</button></div>`;
+  else {
+    const m = S.machines.find(x => x.id === active.machine_id) || {};
+    const task = S.tasks.find(t => t.id === active.task_id);
+    const pct = active.status === "running" ? (m.progress_pct ?? 0) : ["done","delivered"].includes(active.status) ? 100 : 0;
+    $("#active-order").innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="big-id">${esc(active.id)}</span>${badge("job", active.status)}${active.priority === "urgent" ? '<span class="badge s-red">Urgent</span>' : ""}</div>
+      <dl class="kv"><dt>Request</dt><dd title="${esc(active.request)}">${esc(active.request)}</dd>
+      <dt>Machine</dt><dd>${esc(machineName(active.machine_id))}</dd><dt>Job file</dt><dd class="mono">${esc(active.file)}</dd>
+      <dt>Deliver to</dt><dd>${esc(active.deliver_to)}</dd>
+      <dt>Robot</dt><dd>${task ? esc(task.robot_id || "awaiting dispatch") : "—"}</dd>
+      <dt>Instruction</dt><dd>${active.document ? `<a href="${docUrl(active.document.id)}" target="_blank" rel="noopener">${esc(active.document.name)}</a>` : "—"}</dd></dl>
+      <div class="progress"><i style="width:${pct}%"></i></div>`;
+  }
+
+  const bins = 12, now = S.now, counts = Array(bins).fill(0), labels = [];
+  for (let i = 0; i < bins; i++) labels.push(fmtShort(now - (bins - i) * 300));
+  S.tasks.forEach(t => { if (t.status === "done" && t.finished) { const i = bins - 1 - Math.floor((now - t.finished) / 300); if (i >= 0 && i < bins) counts[i]++; } });
+  $("#throughput").innerHTML = bars(counts, labels);
+  renderMap();
+}
+function machineName(id) { const m = S.machines.find(x => x.id === id); return m && m.name !== m.id ? `${m.name} (${id})` : id; }
+
+function renderTimeline() {
+  const end = S.now, start = end - 900;
+  $("#tl-legend").innerHTML = Object.values(LABELS.machine).map(([t, c]) => `<span><i style="background:${COLORS[c]}"></i>${t}</span>`).join("");
+  if (!S.machines.length) { $("#timeline").innerHTML = `<div class="empty">No machines registered.</div>`; return; }
+  let html = "";
+  for (const m of S.machines) {
+    const h = S.machine_history[m.id] || [];
+    let segs = "";
+    for (let i = 0; i < h.length; i++) {
+      const a = Math.max(h[i][0], start), b = i + 1 < h.length ? h[i + 1][0] : end;
+      if (b <= start || b <= a) continue;
+      const left = 100 * (a - start) / 900, width = 100 * (b - a) / 900;
+      const [label] = LABELS.machine[h[i][1]] || [h[i][1]];
+      segs += `<div class="tl-seg" style="left:${left}%;width:${width}%;background:${colorOf("machine", h[i][1])}" title="${esc(label)} · ${fmtTime(h[i][0])}">${width > 7 ? esc(label) : ""}</div>`;
+    }
+    html += `<div class="tl-row"><div class="tl-label"><b>${esc(m.name)}</b><span>${esc(m.id)} · ${esc(m.zone)}</span></div><div class="tl-track">${segs}</div></div>`;
+  }
+  let ticks = ""; for (let i = 0; i <= 6; i++) ticks += `<span style="left:${100 * i / 6}%">${fmtTime(start + 150 * i)}</span>`;
+  $("#timeline").innerHTML = html + `<div class="tl-axis"><div></div><div class="tl-ticks">${ticks}</div></div>`;
+}
+
+function renderMap() {
+  const zones = Object.entries(S.zones);
+  $("#map-legend").innerHTML = Object.values(LABELS.robot).map(([t, c]) => `<span><i style="background:${COLORS[c]};height:8px;width:8px;border-radius:50%"></i>${t}</span>`).join("");
+  if (!zones.length) { $("#floormap").innerHTML = `<div class="empty">No zones defined.</div>`; return; }
+  const xs = zones.map(([, p]) => p.x), ys = zones.map(([, p]) => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const W = 760, H = 430, ZW = 150, ZH = 92, pad = 18;
+  const sx = maxX > minX ? (W - ZW - 2 * pad) / (maxX - minX) : 0, sy = maxY > minY ? (H - ZH - 2 * pad) / (maxY - minY) : 0;
+  const pos = {};
+  zones.forEach(([n, p]) => pos[n] = {x: pad + ZW / 2 + (sx ? (p.x - minX) * sx : (W - ZW - 2 * pad) / 2), y: pad + ZH / 2 + (sy ? (p.y - minY) * sy : (H - ZH - 2 * pad) / 2)});
+  let g = `<defs><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#181b20"/></pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${COLORS.blue}"/></marker></defs>
+    <rect width="${W}" height="${H}" fill="url(#grid)"/>`;
+  // routes for active tasks
+  S.tasks.filter(t => ["assigned","in_progress","pending"].includes(t.status)).forEach(t => {
+    const a = pos[t.from_zone], b = pos[t.to_zone]; if (!a || !b) return;
+    const col = t.status === "pending" ? COLORS.yellow : COLORS.blue;
+    g += `<line class="route" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${col}" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow)" opacity=".85"><title>${esc(t.id)}: ${esc(t.from_zone)} → ${esc(t.to_zone)}</title></line>`;
+  });
+  zones.forEach(([n]) => {
+    const p = pos[n], x = p.x - ZW / 2, y = p.y - ZH / 2, charger = S.chargers.includes(n);
+    g += `<rect x="${x}" y="${y}" width="${ZW}" height="${ZH}" rx="5" fill="#16191e" stroke="${charger ? "#5a4c12" : "#2c3139"}"/>
+      <text x="${x + 9}" y="${y + 17}" font-size="11.5" font-weight="600" fill="#d9dce1">${esc(n.length > 20 ? n.slice(0, 19) + "…" : n)}</text>`;
+    if (charger) g += `<path d="M${x + ZW - 16} ${y + 7}l-5 9h4l-2 7 6-10h-4l2-6z" fill="${COLORS.yellow}"><title>Charging station</title></path>`;
+    S.machines.filter(m => m.zone === n).forEach((m, i) => {
+      const mx = x + 9 + i * 64, my = y + 26;
+      g += `<g><rect x="${mx}" y="${my}" width="58" height="22" rx="3" fill="#1f232a" stroke="${colorOf("machine", m.state)}"/>
+        <text x="${mx + 29}" y="${my + 15}" text-anchor="middle" font-size="10" fill="#d9dce1" font-family="ui-monospace,Menlo,monospace">${esc(m.id.slice(0, 9))}</text>
+        <title>${esc(m.name)} · ${esc((LABELS.machine[m.state] || [m.state])[0])}${m.progress_pct != null ? " · " + m.progress_pct + "%" : ""}</title></g>`;
+    });
+    S.robots.filter(r => r.zone === n).forEach((r, i) => {
+      const col = i % 9, row = Math.floor(i / 9), rx = x + 15 + col * 15, ry = y + ZH - 14 - row * 15;
+      g += `<circle cx="${rx}" cy="${ry}" r="5.5" fill="${colorOf("robot", r.status)}" stroke="#0b0c0f" stroke-width="1.5"><title>${esc(r.id)} · ${esc(r.name)} · ${esc((LABELS.robot[r.status] || [r.status])[0])} · ${r.battery}%</title></circle>`;
+    });
+  });
+  $("#floormap").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Floor map">${g}</svg>`;
+}
+
+/* ------------------------------------------------------------------ work orders */
+let orderFormBuilt = false;
+function buildOrderForm(force) {
+  if (!S || (orderFormBuilt && !force)) return;
+  orderFormBuilt = true;
+  const zones = Object.keys(S.zones);
+  $("#order-form").innerHTML = `
+    <label class="field"><span>Work request</span><textarea name="text" required maxlength="500" placeholder="e.g. Produce one actuator housing and deliver it to the assembly table"></textarea>
+      <small>Plain language. The orchestrator selects the machine and job file; every decision is validated before execution.</small></label>
+    <div class="form-grid">
+      <label class="field"><span>Deliver to</span><select name="deliver_to"><option value="">Automatic (${esc(S.factory.default_output_zone || "default")})</option>${zones.map(z => `<option>${esc(z)}</option>`).join("")}</select></label>
+      <label class="field"><span>Priority</span><select name="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option></select></label>
+      <label class="field full"><span>Work instruction (PDF)</span><select name="document_id"><option value="">None</option>${S.documents.map(d => `<option value="${esc(d.id)}">${esc(d.id)} · ${esc(d.name)}</option>`).join("")}<option value="__upload">Upload a new PDF…</option></select>
+        <small>Sent to the robot that carries out the task, together with its instruction.</small></label>
+      <label class="field full" id="order-upload" hidden><span>New PDF</span><input type="file" name="file" accept="application/pdf,.pdf"></label>
+    </div>
+    <div style="display:flex;justify-content:flex-end"><button class="btn primary" id="order-submit">Submit Work Order</button></div>`;
+  const f = $("#order-form");
+  f.document_id.onchange = () => { $("#order-upload").hidden = f.document_id.value !== "__upload"; };
+}
+async function submitOrder(form, resultEl, onDone) {
+  const btn = form.querySelector("button.primary"); const text = form.text.value.trim();
+  if (!text) return;
+  btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = `<span class="spin"></span> Orchestrator planning…`;
+  resultEl.innerHTML = "";
+  try {
+    let docId = form.document_id.value;
+    if (docId === "__upload") {
+      const file = form.file.files[0]; if (!file) throw new Error("choose a PDF to upload");
+      docId = (await uploadDoc(file)).id;
+    }
+    const r = await api("/api/requests", {body: {text, document_id: docId || null, deliver_to: form.deliver_to.value || null, priority: form.priority.value}});
+    const lat = r.model && r.model.latency_s != null ? ` · ${r.model.model || "model"} ${r.model.latency_s}s` : "";
+    resultEl.innerHTML = `<div class="result ${r.ok ? "ok" : "bad"}"><b>${r.ok ? "Work order accepted" : "Not accepted"}</b><span class="faint">${esc(lat)}</span><br>${esc(r.summary)}
+      ${r.choice && r.choice.reason ? `<br><span class="muted">Reasoning: ${esc(r.choice.reason)}</span>` : ""}
+      ${r.job && r.job.status === "awaiting_confirmation" ? `<div class="mt"><button class="btn sm go" data-action="approve-job" data-id="${esc(r.job.id)}">Review &amp; Start ${esc(r.job.id)}</button></div>` : ""}</div>`;
+    if (r.ok) { form.text.value = ""; toast(r.summary, "ok"); onDone && onDone(r); }
+    await refresh(); buildOrderForm(true);
+  } catch (e) { resultEl.innerHTML = `<div class="result bad">${esc(e.message)}</div>`; }
+  finally { btn.disabled = false; btn.innerHTML = old; }
+}
+function renderOrders() {
+  if (!orderFormBuilt) buildOrderForm();
+  $("#jobs-hint").textContent = `${S.jobs.length} total`;
+  $("#tasks-hint").textContent = `${S.tasks.length} total`;
+  $("#jobs-table").innerHTML = table(["Job", "Request", "Machine / File", "Deliver to", "Status", ""], S.jobs.map(j => `<tr>
+    <td><span class="id">${esc(j.id)}</span><span class="sub-line">${fmtTime(j.created)}</span></td>
+    <td class="wrap">${esc(j.request)}${j.priority === "urgent" ? ' <span class="badge s-red">Urgent</span>' : ""}${j.document ? `<span class="sub-line"><span class="tag">PDF</span> <a href="${docUrl(j.document.id)}" target="_blank" rel="noopener">${esc(j.document.name)}</a></span>` : ""}</td>
+    <td>${esc(machineName(j.machine_id))}<span class="sub-line mono">${esc(j.file)}</span></td><td>${esc(j.deliver_to)}</td>
+    <td>${badge("job", j.status)}${j.error ? `<span class="sub-line" style="color:var(--red)" title="${esc(j.error)}">${esc(j.error.slice(0, 50))}</span>` : ""}</td>
+    <td class="act">${j.status === "awaiting_confirmation" ? `<button class="btn sm danger" data-action="cancel-job" data-id="${esc(j.id)}">Cancel</button><button class="btn sm go" data-action="approve-job" data-id="${esc(j.id)}">Review &amp; Start</button>` : j.task_id ? `<span class="faint">→ ${esc(j.task_id)}</span>` : ""}</td></tr>`), "No work orders yet. Create one on the left.");
+  $("#tasks-table").innerHTML = table(["Task", "Route", "Robot", "Status", "Result"], S.tasks.map(t => `<tr>
+    <td><span class="id">${esc(t.id)}</span><span class="sub-line">${t.job_id ? esc(t.job_id) : "manual"}</span></td>
+    <td>${esc(t.from_zone)} → ${esc(t.to_zone)}${t.document ? `<span class="sub-line"><span class="tag">PDF</span> <a href="${docUrl(t.document.id)}" target="_blank" rel="noopener">${esc(t.document.name)}</a></span>` : ""}</td>
+    <td>${t.robot_id ? `<span class="id">${esc(t.robot_id)}</span>` : '<span class="faint">unassigned</span>'}${t.reason ? `<span class="sub-line" title="${esc(t.reason)}">${esc(t.reason.slice(0, 48))}</span>` : ""}</td>
+    <td>${badge("task", t.status)}</td><td class="wrap muted">${esc(t.note || "")}</td></tr>`), "No robot tasks yet.");
+}
+function table(head, rows, empty) {
+  return `<table><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="${head.length}" class="empty">${esc(empty)}</td></tr>`}</tbody></table>`;
+}
+
+/* ------------------------------------------------------------------ fleet */
+function batteryCell(b, status) {
+  const c = status === "offline" ? COLORS.grey : b < 25 ? COLORS.red : b < 50 ? COLORS.yellow : COLORS.green;
+  return `<span class="battery"><i><b style="width:${b}%;background:${c}"></b></i>${b}%</span>`;
+}
+function renderFleet() {
+  const R = S.robots;
+  $("#fleet-hint").textContent = `${R.filter(r => ONLINE.has(r.status)).length} online · ${R.length} registered`;
+  $("#fleet-table").innerHTML = table(["Robot", "Type", "Location", "Battery", "Status", "Current task", "Connection", "Last seen", ""], R.map(r => `<tr>
+    <td><span class="id">${esc(r.id)}</span><span class="sub-line">${esc(r.name)}</span></td>
+    <td>${esc(KINDS[r.kind] || r.kind)}<span class="sub-line">${esc([r.model, r.payload_kg != null ? r.payload_kg + " kg payload" : ""].filter(Boolean).join(" · "))}</span></td>
+    <td>${esc(r.zone || "Unknown")}</td><td>${batteryCell(r.battery, r.status)}</td><td>${badge("robot", r.status)}</td>
+    <td>${r.active_tasks.length ? `<span class="id">${esc(r.active_tasks.join(", "))}</span>` : '<span class="faint">—</span>'}</td>
+    <td><span class="tag">${r.connection === "simulated" ? "Digital twin" : "Edge agent"}</span>${r.source === "file" ? '<span class="sub-line">factory file</span>' : r.source === "heartbeat" ? '<span class="sub-line">self-registered</span>' : ""}</td>
+    <td class="muted">${ago(r.seen_s_ago)}</td>
+    <td>${r.source !== "file" ? `<button class="btn sm danger" data-action="remove-robot" data-id="${esc(r.id)}" ${r.active_tasks.length ? "disabled" : ""}>Remove</button>` : `<button class="btn sm" data-action="connect-robot" data-id="${esc(r.id)}">Connect</button>`}</td></tr>`),
+    "No robots registered. Use Register Robot to add your fleet.");
+}
+function agentCommand(id) {
+  return `robofleet robot run --server ${location.origin} --id ${id} \\\n  --exec 'bash real/run_fast.sh {instruction}'` + (token ? ` \\\n  --token <API token>` : "");
+}
+
+/* ------------------------------------------------------------------ machines */
+function renderMachines() {
+  $("#machines-hint").textContent = `${S.machines.length} registered`;
+  $("#machine-cards").innerHTML = S.machines.length ? S.machines.map(m => {
+    const pct = m.progress_pct;
+    return `<div class="panel" style="background:var(--panel-2)">
+      <div class="panel-head"><div><div class="panel-title">${esc(m.name)}</div><div class="muted mono" style="font-size:11.5px">${esc(m.id)}</div></div>
+        <div class="actions">${badge("machine", m.state)}</div></div>
+      <dl class="kv" style="margin-top:0"><dt>Type</dt><dd>${esc(MTYPES[m.type] || m.type)}</dd><dt>Zone</dt><dd>${esc(m.zone)}</dd>
+        <dt>Connection</dt><dd>${esc(DRIVER_CLASS[m.driver] || m.driver)}</dd>
+        <dt>Current job</dt><dd class="mono">${esc(m.job || "—")}</dd>
+        <dt>Job files</dt><dd title="${esc(m.files.join(", "))}">${m.files.length ? esc(m.files.length + " available") : '<span style="color:var(--red)">none</span>'}</dd>
+        ${m.error ? `<dt>Error</dt><dd style="color:var(--red)" title="${esc(m.error)}">${esc(m.error)}</dd>` : ""}</dl>
+      ${pct != null ? `<div class="progress"><i style="width:${pct}%"></i></div><div class="muted" style="font-size:11.5px;margin-top:4px">${pct}%${m.remaining_min != null ? " · " + m.remaining_min + " min remaining" : ""}</div>` : ""}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><span class="faint" style="font-size:11.5px">${m.source === "file" ? "Defined in factory file" : "Added from dashboard"}</span>
+        ${m.source !== "file" ? `<button class="btn sm danger" data-action="remove-machine" data-id="${esc(m.id)}">Remove</button>` : ""}</div></div>`;
+  }).join("") : `<div class="empty">No machines registered.</div>`;
+  $("#zones-table").innerHTML = table(["Zone", "Position (x, y)", "Machines", "Robots present", "Role"], Object.entries(S.zones).map(([n, p]) => `<tr>
+    <td><b>${esc(n)}</b></td><td class="mono">${p.x}, ${p.y}</td>
+    <td>${esc(S.machines.filter(m => m.zone === n).map(m => m.id).join(", ") || "—")}</td>
+    <td>${S.robots.filter(r => r.zone === n).length}</td>
+    <td>${S.chargers.includes(n) ? '<span class="badge s-yellow">Charging station</span>' : n === S.factory.default_output_zone ? '<span class="badge s-green">Default output</span>' : ""}</td></tr>`), "No zones.");
+}
+
+/* ------------------------------------------------------------------ documents */
+async function uploadDoc(file) {
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") throw new Error("only PDF files are accepted");
+  const doc = await api("/api/documents", {raw: file, headers: {"Content-Type": "application/pdf", "X-Filename": encodeURIComponent(file.name)}});
+  toast(`Uploaded ${doc.name} as ${doc.id}`, "ok");
+  return doc;
+}
+function renderDocuments() {
+  const used = id => S.jobs.filter(j => j.document && j.document.id === id).length + S.tasks.filter(t => t.document && t.document.id === id && !t.job_id).length;
+  $("#docs-table").innerHTML = S.factory.persistent ? table(["Document", "File name", "Size", "Uploaded", "Work orders", ""], S.documents.map(d => `<tr>
+    <td><span class="id">${esc(d.id)}</span></td><td><a href="${docUrl(d.id)}" target="_blank" rel="noopener">${esc(d.name)}</a></td>
+    <td class="muted">${fmtSize(d.size)}</td><td class="muted">${new Date(d.uploaded * 1000).toLocaleString()}</td><td>${used(d.id)}</td>
+    <td><button class="btn sm danger" data-action="remove-doc" data-id="${esc(d.id)}">Delete</button></td></tr>`), "No documents uploaded yet.")
+    : `<div class="result bad">Document storage is disabled. Start the server with <span class="mono">--data-dir</span> to enable uploads.</div>`;
+}
+
+/* ------------------------------------------------------------------ activity */
+const EV_KINDS = {all:"All", request:"Requests", job:"Jobs", dispatch:"Dispatch", task:"Tasks", robot:"Robots", config:"Configuration", model:"Orchestrator", checker:"Validation", error:"Errors"};
+function renderActivity() {
+  $("#ev-filters").innerHTML = Object.entries(EV_KINDS).map(([k, l]) => `<button class="${evFilter === k ? "on" : ""}" data-action="ev-filter" data-id="${k}">${l}</button>`).join("");
+  const KC = {request:"purple", job:"blue", dispatch:"cyan", task:"green", robot:"grey", config:"yellow", model:"orange", checker:"orange", error:"red"};
+  const ev = S.events.filter(e => evFilter === "all" || e.kind === evFilter);
+  $("#events-table").innerHTML = table(["Time", "Category", "Event"], ev.map(e => `<tr><td class="muted mono">${fmtTime(e.ts)}</td>
+    <td><span class="badge s-${KC[e.kind] || "grey"}">${esc(EV_KINDS[e.kind] || e.kind)}</span></td><td class="wrap">${esc(e.text)}</td></tr>`), "No events.");
+}
+
+/* ------------------------------------------------------------------ dialogs */
+const dlg = $("#dlg");
+function openDialog(title, body, foot, onSubmit) {
+  $("#dlg-title").textContent = title; $("#dlg-body").innerHTML = body; $("#dlg-foot").innerHTML = foot;
+  dlg._submit = onSubmit; dlg.showModal();
+}
+$("#dlg-form").addEventListener("submit", async e => {
+  const action = e.submitter && e.submitter.value;
+  if (action !== "ok" || !dlg._submit) return;
+  e.preventDefault();
+  const btn = e.submitter; btn.disabled = true;
+  try { if (await dlg._submit(e.target) !== false) dlg.close(); }
+  catch (err) { toast(err.message, "bad"); }
+  finally { btn.disabled = false; }
+});
+const foot = (label, cls = "primary") => `<button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn ${cls}" value="ok">${label}</button>`;
+const opts = (obj, sel) => Object.entries(obj).map(([v, l]) => `<option value="${esc(v)}" ${v === sel ? "selected" : ""}>${esc(l)}</option>`).join("");
+const zoneOpts = sel => Object.keys(S.zones).map(z => `<option ${z === sel ? "selected" : ""}>${esc(z)}</option>`).join("");
+
+function dlgNewOrder() {
+  openDialog("New Work Order", `<div class="stack" id="dlg-order"></div><div id="dlg-order-result"></div>`, foot("Submit Work Order"), async form => {
+    await submitOrder(form, $("#dlg-order-result"), r => { if (!(r.job && r.job.status === "awaiting_confirmation")) setTimeout(() => dlg.close(), 900); });
+    return false;
+  });
+  const zones = Object.keys(S.zones);
+  $("#dlg-order").innerHTML = `
+    <label class="field"><span>Work request</span><textarea name="text" required maxlength="500" placeholder="e.g. Produce one actuator housing and deliver it to the assembly table"></textarea></label>
+    <div class="form-grid">
+      <label class="field"><span>Deliver to</span><select name="deliver_to"><option value="">Automatic (${esc(S.factory.default_output_zone || "default")})</option>${zones.map(z => `<option>${esc(z)}</option>`).join("")}</select></label>
+      <label class="field"><span>Priority</span><select name="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option></select></label>
+      <label class="field full"><span>Work instruction (PDF)</span><select name="document_id"><option value="">None</option>${S.documents.map(d => `<option value="${esc(d.id)}">${esc(d.id)} · ${esc(d.name)}</option>`).join("")}<option value="__upload">Upload a new PDF…</option></select></label>
+      <label class="field full" id="dlg-upload" hidden><span>New PDF</span><input type="file" name="file" accept="application/pdf,.pdf"></label>
+    </div>`;
+  const f = $("#dlg-form"); f.document_id.onchange = () => { $("#dlg-upload").hidden = f.document_id.value !== "__upload"; };
+  f.text.focus();
+}
+
+function dlgApprove(id) {
+  const j = S.jobs.find(x => x.id === id); if (!j) return;
+  openDialog(`Approve ${id}`, `
+    <dl class="kv" style="margin-top:0"><dt>Request</dt><dd style="white-space:normal">${esc(j.request)}</dd><dt>Machine</dt><dd>${esc(machineName(j.machine_id))}</dd>
+      <dt>Job file</dt><dd class="mono">${esc(j.file)}</dd><dt>Deliver to</dt><dd>${esc(j.deliver_to)}</dd>
+      <dt>Work instruction</dt><dd>${j.document ? esc(j.document.name) : "—"}</dd><dt>Orchestrator note</dt><dd style="white-space:normal">${esc(j.reason || "—")}</dd></dl>
+    <label class="check mt"><input type="checkbox" name="safe" required><span>I have checked the machine is safe to start: build plate clear, no obstructions, material loaded.</span></label>`,
+    foot("Approve &amp; Start", "go"), async form => {
+      if (!form.safe.checked) throw new Error("Confirm the safety check first");
+      await api(`/api/jobs/${encodeURIComponent(id)}/confirm`, {body: {}});
+      toast(`${id} approved, starting ${j.machine_id}`, "ok"); refresh();
+    });
+}
+function dlgConfirm(title, text, label, fn) {
+  openDialog(title, `<p style="margin:0">${text}</p>`, foot(label, "danger"), async () => { await fn(); refresh(); });
+}
+
+function dlgAddRobot() {
+  openDialog("Register Robot", `
+    <div class="form-grid">
+      <label class="field"><span>Registration</span><select name="mode"><option value="single">Single robot</option><option value="batch">Batch (auto-numbered IDs)</option></select></label>
+      <label class="field" data-show="single"><span>Robot ID</span><input type="text" name="id" maxlength="40" placeholder="e.g. RBT-011" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{0,39}"></label>
+      <label class="field" data-show="batch" hidden><span>Quantity</span><input type="number" name="count" min="1" max="50" value="5"></label>
+      <label class="field"><span>Display name</span><input type="text" name="name" maxlength="60" placeholder="e.g. Mobile Manipulator"></label>
+      <label class="field"><span>Robot type</span><select name="kind">${opts(KINDS, "mobile_manipulator")}</select></label>
+      <label class="field"><span>Model / platform</span><input type="text" name="model" maxlength="60" placeholder="e.g. SO-101"></label>
+      <label class="field"><span>Home zone</span><select name="home_zone">${zoneOpts(Object.keys(S.zones).find(z => /park/i.test(z)))}</select></label>
+      <label class="field"><span>Payload capacity (kg)</span><input type="number" name="payload_kg" min="0" step="0.1" placeholder="optional"></label>
+      <label class="field full"><span>Capabilities</span><input type="text" name="capabilities" value="pick_and_place" maxlength="200"><small>Comma-separated, e.g. pick_and_place, transport, inspection</small></label>
+      <label class="field full"><span>Connection</span><select name="connection">
+        <option value="simulated">Digital twin: simulated robot, runs inside the server</option>
+        <option value="agent">Edge agent: physical robot runs the robofleet agent</option></select></label>
+      <label class="field" data-conn="simulated"><span>Initial battery (%)</span><input type="number" name="battery" min="0" max="100" value="100"></label>
+    </div>`, foot("Register"), async form => {
+      const batch = form.mode.value === "batch";
+      const body = {name: form.elements.name.value.trim(), kind: form.kind.value, model: form.model.value.trim(), home_zone: form.home_zone.value,
+        payload_kg: form.payload_kg.value === "" ? null : Number(form.payload_kg.value), capabilities: form.capabilities.value,
+        connection: form.connection.value, battery: Number(form.battery.value || 100), count: batch ? Number(form.count.value) : 1};
+      if (!batch) { if (!form.elements.id.value.trim()) throw new Error("Enter a robot ID"); body.id = form.elements.id.value.trim(); }
+      const r = await api("/api/robots", {body});
+      const ids = r.robots.map(x => x.id);
+      toast(`Registered ${ids.join(", ")}`, "ok"); refresh();
+      if (body.connection === "agent") setTimeout(() => dlgConnect(ids[0], ids.length > 1), 50);
+    });
+  const f = $("#dlg-form");
+  const sync = () => {
+    document.querySelectorAll("#dlg [data-show]").forEach(el => el.hidden = el.dataset.show !== f.mode.value);
+    document.querySelectorAll("#dlg [data-conn]").forEach(el => el.hidden = el.dataset.conn !== f.connection.value);
+  };
+  f.mode.onchange = sync; f.connection.onchange = sync; sync();
+}
+function dlgConnect(id, many) {
+  openDialog(`Connect ${id}`, `<p style="margin-top:0">Run the agent on the robot's computer (or next to it). The command after <span class="mono">--exec</span> runs the robot's own controller or VLA model for each task.
+    Placeholders: <span class="mono">{instruction} {from_zone} {to_zone} {task_id} {document}</span>.${many ? " Repeat with each robot ID." : ""}</p>
+    <pre class="cmd">${esc(agentCommand(id))}</pre>
+    <p class="muted" style="margin-bottom:0">Start the server with <span class="mono">--host 0.0.0.0 --token …</span> so robots on the network can reach it securely.</p>`,
+    `<button class="btn primary" value="cancel">Done</button>`, null);
+}
+
+function dlgAddMachine() {
+  openDialog("Register Machine", `
+    <div class="form-grid">
+      <label class="field"><span>Machine ID</span><input type="text" name="id" required maxlength="40" placeholder="e.g. PRINTER-2" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{0,39}"></label>
+      <label class="field"><span>Display name</span><input type="text" name="name" maxlength="60" placeholder="e.g. Bambu Lab A1 #2"></label>
+      <label class="field"><span>Machine type</span><select name="type">${opts(MTYPES)}</select></label>
+      <label class="field"><span>Zone</span><select name="zone">${zoneOpts(Object.keys(S.zones).find(z => /print/i.test(z)))}</select></label>
+      <label class="field full"><span>Connection</span><select name="driver">${opts(DRIVERS, "simulated")}</select></label>
+      <label class="field full" data-drv="simulated"><span>Job files</span><input type="text" name="files" value="actuator_housing.gcode.3mf, actuator_gear.gcode.3mf"><small>Comma-separated file names the orchestrator can choose from.</small></label>
+      <label class="field" data-drv="simulated"><span>Cycle time (seconds)</span><input type="number" name="print_seconds" min="1" value="20"></label>
+      <label class="field" data-drv="bambu"><span>IP address</span><input type="text" name="ip" placeholder="192.168.1.50"></label>
+      <label class="field" data-drv="bambu"><span>Serial number</span><input type="text" name="serial" placeholder="from printer screen"></label>
+      <label class="field" data-drv="bambu"><span>LAN access code</span><input type="password" name="access_code" autocomplete="new-password"><small>Stored only on this server, never shown again.</small></label>
+      <label class="field" data-drv="bambu"><span>Print files folder</span><input type="text" name="prints_dir" value="prints"><small>Sliced *.gcode.3mf files, relative to the server folder.</small></label>
+      <label class="check full" data-drv="bambu"><input type="checkbox" name="use_ams"><span>Use AMS (automatic material system)</span></label>
+    </div>`, foot("Register"), async form => {
+      const body = {id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), type: form.type.value, zone: form.zone.value, driver: form.driver.value};
+      if (body.driver === "simulated") Object.assign(body, {files: form.files.value, print_seconds: Number(form.print_seconds.value)});
+      else Object.assign(body, {ip: form.ip.value.trim(), serial: form.serial.value.trim(), access_code: form.access_code.value, prints_dir: form.prints_dir.value.trim(), use_ams: form.use_ams.checked});
+      await api("/api/machines", {body}); toast(`Machine ${body.id} registered`, "ok"); refresh();
+    });
+  const f = $("#dlg-form");
+  const sync = () => document.querySelectorAll("#dlg [data-drv]").forEach(el => el.hidden = el.dataset.drv !== f.driver.value);
+  f.driver.onchange = sync; sync();
+}
+function dlgAddZone() {
+  openDialog("Add Zone", `<div class="form-grid">
+      <label class="field full"><span>Zone name</span><input type="text" name="name" required maxlength="60" placeholder="e.g. Quality Inspection"></label>
+      <label class="field"><span>X position (m)</span><input type="number" name="x" step="0.1" required value="0"></label>
+      <label class="field"><span>Y position (m)</span><input type="number" name="y" step="0.1" required value="0"></label></div>
+      <p class="muted" style="margin-bottom:0">Positions are used to compute robot travel distances for dispatch.</p>`, foot("Add Zone"), async form => {
+      await api("/api/zones", {body: {name: form.elements.name.value.trim(), x: Number(form.x.value), y: Number(form.y.value)}});
+      toast(`Zone ${form.elements.name.value.trim()} added`, "ok"); orderFormBuilt = false; refresh();
+    });
+}
+
+/* ------------------------------------------------------------------ events */
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tab]"); if (t) return setTab(t.dataset.tab);
+  const a = e.target.closest("[data-action]"); if (!a || !S) return;
+  const id = a.dataset.id;
+  switch (a.dataset.action) {
+    case "new-order": return dlgNewOrder();
+    case "approve-job": if (dlg.open) dlg.close(); return dlgApprove(id);
+    case "cancel-job": return dlgConfirm(`Cancel ${id}`, `Cancel work order <b>${esc(id)}</b>? The machine will not start.`, "Cancel Job", () => api(`/api/jobs/${encodeURIComponent(id)}/cancel`, {body: {}}));
+    case "add-robot": return dlgAddRobot();
+    case "connect-robot": return dlgConnect(id, false);
+    case "remove-robot": return dlgConfirm(`Remove ${id}`, `Remove robot <b>${esc(id)}</b> from the fleet?`, "Remove", () => api(`/api/robots/${encodeURIComponent(id)}`, {method: "DELETE"}));
+    case "add-machine": return dlgAddMachine();
+    case "remove-machine": return dlgConfirm(`Remove ${id}`, `Remove machine <b>${esc(id)}</b>?`, "Remove", () => api(`/api/machines/${encodeURIComponent(id)}`, {method: "DELETE"}));
+    case "add-zone": return dlgAddZone();
+    case "remove-doc": return dlgConfirm(`Delete ${id}`, `Delete document <b>${esc(id)}</b>? Work orders that reference it will no longer be able to open it.`, "Delete", () => api(`/api/documents/${encodeURIComponent(id)}`, {method: "DELETE"}));
+    case "ev-filter": evFilter = id; return renderActivity();
+  }
+});
+$("#order-form").addEventListener("submit", e => { e.preventDefault(); submitOrder(e.target, $("#order-result")); });
+const drop = $("#doc-drop"), docFile = $("#doc-file");
+docFile.onchange = async () => { if (docFile.files[0]) { try { await uploadDoc(docFile.files[0]); refresh(); } catch (e) { toast(e.message, "bad"); } docFile.value = ""; } };
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", async e => { e.preventDefault(); drop.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) { try { await uploadDoc(f); refresh(); } catch (err) { toast(err.message, "bad"); } } });
+
+setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+setTab(tab in {overview:1, orders:1, fleet:1, machines:1, documents:1, activity:1} ? tab : "overview");
+refresh().then(() => { if (tab === "orders") buildOrderForm(); });
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

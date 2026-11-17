@@ -7,19 +7,25 @@ Executors:
   SimulatedExecutor  drives a virtual robot (travel time from zone distance). For demos.
   CommandExecutor    runs a shell command per task, e.g. the robot's own local AI:
                      'bash real/run_fast.sh {instruction}'   (so101-vlm-agent)
-                     Placeholders: {instruction} {from_zone} {to_zone} {task_id}; exit code 0 = success.
+                     Placeholders: {instruction} {from_zone} {to_zone} {task_id} {document};
+                     exit code 0 = success. {document} is the local path of the work instruction PDF
+                     attached to the work order (empty when there is none).
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 import shlex
 import subprocess
 import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+DOCUMENTS_DIR = Path.home() / ".robofleet" / "documents"
 
 
 class FactoryClient:
@@ -47,6 +53,17 @@ class FactoryClient:
     def state(self) -> dict:
         return self.call("/api/state")
 
+    def fetch_document(self, document: dict, folder: Path | None = None) -> str:
+        """Downloads a work order's reference PDF and returns its local path."""
+        folder = Path(folder or DOCUMENTS_DIR)
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', document['id'])}.pdf"
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        request = urllib.request.Request(self.base_url + f"/api/documents/{document['id']}", headers=headers)
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            target.write_bytes(response.read())
+        return str(target)
+
     def request(self, text: str) -> dict:
         return self.call("/api/requests", {"text": text}, timeout=330)
 
@@ -67,6 +84,8 @@ class SimulatedExecutor:
         return math.hypot(pa["x"] - pb["x"], pa["y"] - pb["y"]) / self.speed
 
     def run(self, task: dict, robot: "RobotAgent") -> tuple[bool, str]:
+        if task.get("document_path"):
+            robot.log(f"work instruction: {task['document_path']}")
         robot.log(f"driving to {task['from_zone']}")
         time.sleep(self._travel(robot.zone, task["from_zone"]))
         robot.zone = task["from_zone"]
@@ -89,6 +108,7 @@ class CommandExecutor:
     def run(self, task: dict, robot: "RobotAgent") -> tuple[bool, str]:
         values = {k: shlex.quote(str(task.get(k, ""))) for k in ("instruction", "from_zone", "to_zone")}
         values["task_id"] = shlex.quote(task["id"])
+        values["document"] = shlex.quote(task.get("document_path") or "")
         command = self.template.format(**values)
         robot.log(f"running: {command}")
         try:
@@ -131,6 +151,8 @@ class RobotAgent:
 
     def _work(self, task: dict) -> None:
         try:
+            if task.get("document") and hasattr(self.client, "fetch_document"):
+                task["document_path"] = self.client.fetch_document(task["document"])
             ok, note = self.executor.run(task, self)
         except Exception as e:
             ok, note = False, f"executor error: {e!r}"

@@ -2,6 +2,7 @@ config/printer.json
 .venv/
 jobs/
 logs/
+data/
 prints/*.gcode.3mf
 __pycache__/
 *.egg-info/
