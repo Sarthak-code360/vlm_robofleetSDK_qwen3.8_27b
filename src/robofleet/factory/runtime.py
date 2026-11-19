@@ -26,7 +26,9 @@ from pathlib import Path
 from ..coordinator import Coordinator
 from ..model import ModelClient, ModelError
 from .assistant import DEFAULT_ASSISTANT, AssistantMixin
-from .machines import DRIVERS, MACHINE_TYPES, Machine, MachineError, SimulatedPrinter, SimulatedStation, build_machine, machine_stage
+from .catalog import MACHINE_CATALOG, PREFIX, accepted_extensions, machine_label
+from .machines import (DRIVERS, MACHINE_TYPES, Machine, MachineError, SimulatedPrinter, SimulatedStation, build_machine,
+                       is_live, machine_stage)
 
 ROBOT_STATUSES = {"idle", "busy", "charging", "fault"}
 ROBOT_KINDS = {"mobile_manipulator", "robotic_arm", "amr", "humanoid", "other"}
@@ -75,6 +77,8 @@ class Factory(AssistantMixin):
         self.default_output_zone = config.get("default_output_zone")
         self.dispatch_with_model = config.get("dispatch", "model") == "model"
         self.assistant_name = str(config.get("assistant_name") or DEFAULT_ASSISTANT)
+        instructions = config.get("assistant_instructions") or []
+        self.assistant_instructions = [str(i)[:500] for i in ([instructions] if isinstance(instructions, str) else instructions)][:30]
         self.products: dict[str, dict] = {str(k): {"parts": dict(v.get("parts", {})), "description": str(v.get("description", ""))}
                                           for k, v in (config.get("products") or {}).items()}
         self.chat: list[dict] = []
@@ -87,6 +91,8 @@ class Factory(AssistantMixin):
         for r in config.get("robots", []):
             self._register_robot(r, source="file")
         self.machine_source = {mid: "file" for mid in machines}
+        for m in machines.values():
+            self._attach_upload_dir(m)
         self.machine_history: dict[str, list[list]] = {}
         self.documents: dict[str, dict] = {}
         self.registry = {"zones": {}, "machines": [], "robots": []}
@@ -511,10 +517,13 @@ class Factory(AssistantMixin):
                 raise KeyError(spec["document_id"])
             document = {k: self.documents[spec["document_id"]][k] for k in ("id", "name")}
 
+        steps = self._run_steps(spec.get("steps")) if spec.get("steps") else None
         with self.lock:
             files_by_machine = {m.id: set(m.list_files()) for m in self.machines.values()}
+            if steps:  # only the chosen machines take part, each with its own job
+                files_by_machine = {s["machine_id"]: {s["job"]} for s in steps}
         available = set().union(*files_by_machine.values()) if files_by_machine else set()
-        parts = spec.get("parts") or {}
+        parts = {s["job"]: 1 for s in steps} if steps else (spec.get("parts") or {})
         if not isinstance(parts, dict):
             raise ValueError("parts must be an object {job file: quantity per unit}")
         if not parts:
@@ -559,13 +568,54 @@ class Factory(AssistantMixin):
             run = {"id": self._next_id("RUN"), "name": name, "description": str(spec.get("description") or "")[:500],
                    "target": target, "parts": clean, "document": document, "deliver_to": deliver_to,
                    "approve_each_job": approve, "machines": machines_used, "status": "running",
-                   "stages": stages, "route": route,
+                   "stages": stages, "route": route, "steps": steps or [],
                    "created": time.time(), "finished": None, "reason": ""}
             self.runs[run["id"]] = run
             self._event("run", f"Production run {run['id']} started: {target} × {name} "
                                f"({', '.join(f'{q}× {f}' for f, q in clean.items())} per unit)", run_id=run["id"])
         self.tick_soon()
         return self.run_view(run)
+
+    def _run_steps(self, raw) -> list[dict]:
+        """Validates the machines chosen for a run and their inputs. Each step = one machine and its job per unit."""
+        if not isinstance(raw, list) or not raw or len(raw) > 30:
+            raise ValueError("choose between 1 and 30 machines")
+        steps, jobs = [], set()
+        for item in raw:
+            mtype = (item or {}).get("type")
+            mid = (item or {}).get("machine_id") or self.ensure_machine(mtype)["id"]
+            machine = self.machines.get(mid)
+            if machine is None:
+                raise ValueError(f"unknown machine {mid}")
+            catalog = MACHINE_CATALOG.get(machine.type, {"label": machine.type, "inputs": []})
+            inputs = {k: v for k, v in dict(item.get("inputs") or {}).items() if v not in (None, "")}
+            for field in catalog["inputs"]:
+                if field.get("required") and field["key"] not in inputs:
+                    raise ValueError(f"{machine.spec.get('name') or mid}: {field['label']} is required")
+                if field["kind"] == "number" and field["key"] in inputs:
+                    try:
+                        inputs[field["key"]] = float(inputs[field["key"]])
+                    except (TypeError, ValueError):
+                        raise ValueError(f"{field['label']} must be a number") from None
+                if field["kind"] == "select" and field["key"] in inputs and inputs[field["key"]] not in field["options"]:
+                    raise ValueError(f"{field['label']}: choose one of {', '.join(field['options'])}")
+            job_field = next((f for f in catalog["inputs"] if f.get("job") and f["key"] in inputs), None)
+            job = str(inputs[job_field["key"]]) if job_field else f"{machine.type}_job"
+            if job_field and job_field["kind"] == "file" and job not in machine.list_files():
+                raise ValueError(f"{job} is not on {machine.spec.get('name') or mid}; upload it first")
+            if not is_live(machine):
+                job = re.sub(r"[^\w .()+-]", "_", job)[:100]
+                if job not in machine.spec.setdefault("files", []):
+                    machine.spec["files"].append(job)  # the simulated machine learns this job
+            base, n = job, 2
+            while job in jobs:  # two machines with the same job name: keep them apart
+                job = f"{base} ({n})"; n += 1
+                if not is_live(machine):
+                    machine.spec["files"].append(job)
+            jobs.add(job)
+            steps.append({"machine_id": mid, "type": machine.type, "label": machine_label(machine.type),
+                          "live": is_live(machine), "job": job, "inputs": inputs})
+        return steps
 
     def match_product(self, text: str) -> str | None:
         """The catalog product a request is about ("make 2 rockets" -> "Sounding Rocket"), if exactly one fits."""
@@ -905,6 +955,7 @@ class Factory(AssistantMixin):
             except (ImportError, MachineError, KeyError, OSError) as e:
                 raise ValueError(f"cannot connect {mid}: {e}") from e
             self.machines[mid] = machine
+            self._attach_upload_dir(machine)
             self.machine_source[mid] = "dashboard"
             self.registry["machines"].append(entry)
             self._save_registry()
@@ -937,46 +988,89 @@ class Factory(AssistantMixin):
             return [{"name": f, "size": None, "modified": None, "deletable": False} for f in machine.list_files()]
         return machine.file_details()
 
-    def add_machine_file(self, machine_id: str, filename: str, upload: Path) -> dict:
-        """Moves an uploaded sliced file (``*.gcode.3mf``) into the machine's prints folder."""
+    def _attach_upload_dir(self, machine: Machine) -> None:
+        if isinstance(machine, SimulatedStation) and self.data_dir:
+            machine.upload_dir = self.data_dir / "jobs" / machine.id
+
+    def upload_folder(self, machine_id: str) -> Path:
+        """Where uploaded job files of this machine are kept (printers: their prints folder)."""
         machine = self.machines.get(machine_id)
         if machine is None:
             raise KeyError(machine_id)
-        if not hasattr(machine, "prints_dir"):
-            raise ValueError(f"{machine_id} does not take print files")
+        if hasattr(machine, "prints_dir"):
+            return machine.prints_dir()
+        if getattr(machine, "upload_dir", None):
+            return machine.upload_dir
+        raise ValueError(f"{machine_id} cannot store files (start the server with --data-dir)")
+
+    def add_machine_file(self, machine_id: str, filename: str, upload: Path) -> dict:
+        """Stores an uploaded job file: a sliced ``.gcode.3mf`` for 3D printers, the catalog's file types for others."""
+        machine = self.machines.get(machine_id)
+        if machine is None:
+            raise KeyError(machine_id)
+        folder = self.upload_folder(machine_id)
         name = re.sub(r"[^\w .()+-]", "_", Path(str(filename or "")).name).strip()
-        if not name.lower().endswith(".gcode.3mf"):
-            raise ValueError("upload a sliced Bambu Studio file ending in .gcode.3mf (File → Export plate sliced file)")
-        if len(name) > 120:
-            raise ValueError("file name is too long")
-        with open(upload, "rb") as f:
-            if f.read(4) != b"PK\x03\x04":
-                raise ValueError("this is not a valid .3mf file")
-        folder = machine.prints_dir()
+        if len(name) > 120 or not name or name.startswith("."):
+            raise ValueError("file name is missing or too long")
+        if hasattr(machine, "prints_dir"):
+            if not name.lower().endswith(".gcode.3mf"):
+                raise ValueError("upload a sliced Bambu Studio file ending in .gcode.3mf (File → Export plate sliced file)")
+            with open(upload, "rb") as f:
+                if f.read(4) != b"PK\x03\x04":
+                    raise ValueError("this is not a valid .3mf file")
+        else:
+            allowed = accepted_extensions(machine.type)
+            if allowed and not any(name.lower().endswith(ext) for ext in allowed):
+                raise ValueError(f"{machine_label(machine.type)} takes {', '.join(allowed)} files")
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / name
         with self.lock:
             if any(j["machine_id"] == machine_id and j["file"] == name and j["status"] in HOLDING_JOB
                    for j in self.jobs.values()):
-                raise ValueError(f"{name} is being printed right now; upload it under another name")
+                raise ValueError(f"{name} is in use right now; upload it under another name")
             Path(upload).replace(target)
             self._event("config", f"File {name} uploaded to {machine_id}")
         return next(d for d in self.machine_files(machine_id) if d["name"] == name)
 
     def remove_machine_file(self, machine_id: str, name: str) -> dict:
-        machine = self.machines.get(machine_id)
-        if machine is None or not hasattr(machine, "prints_dir"):
-            raise KeyError(machine_id)
-        path = machine.prints_dir() / Path(name).name
+        path = self.upload_folder(machine_id) / Path(name).name
         if not path.is_file():
             raise ValueError(f"{name} is not an uploaded file of {machine_id}")
         with self.lock:
             if any(j["machine_id"] == machine_id and j["file"] == path.name and j["status"] in HOLDING_JOB
                    for j in self.jobs.values()):
-                raise ValueError(f"{path.name} is being printed right now")
+                raise ValueError(f"{path.name} is in use right now")
             path.unlink()
             self._event("config", f"File {path.name} removed from {machine_id}")
         return {"name": path.name}
+
+    def ensure_machine(self, machine_type: str) -> dict:
+        """A machine of this type: an existing one (live hardware first), or a new simulated one."""
+        if machine_type not in MACHINE_CATALOG:
+            raise ValueError(f"unknown machine type {machine_type!r}")
+        with self.lock:
+            same = [m for m in self.machines.values() if m.type == machine_type]
+            same.sort(key=lambda m: (not is_live(m), m.id))
+            if same:
+                return self._machine_view(same[0])
+            words = set(re.findall(r"[a-z]+", machine_label(machine_type).lower())) - {"machine", "cnc", "and", "the"}
+            zone = next((z for z in self.site["zones"] if words & set(re.findall(r"[a-z]+", z.lower()))), None)
+            if zone is None:
+                if "Workshop" not in self.site["zones"]:
+                    xs = [p["x"] for p in self.site["zones"].values()] or [0]
+                    self.add_zone("Workshop", max(xs) + 10, 0)
+                zone = "Workshop"
+            mid = self._free_ids(PREFIX.get(machine_type, "M"), 1, self.machines)[0]
+        self.add_machine({"id": mid, "name": machine_label(machine_type), "type": machine_type, "driver": "simulated",
+                          "zone": zone, "files": [f"{machine_type}_job"], "print_seconds": 20})
+        self.machine_source[mid] = "auto"
+        return self._machine_view(self.machines[mid])
+
+    def _machine_view(self, m: Machine) -> dict:
+        info = m.describe() | {"files": m.list_files()}
+        info.update(name=m.spec.get("name") or m.id, live=is_live(m), type_label=machine_label(m.type),
+                    stage=machine_stage(m), source=self.machine_source.get(m.id, "file"))
+        return info
 
     def print_file(self, machine_id: str, file: str, robot_id: str | None = None) -> dict:
         """Starts one print of ``file`` on that machine; a robot collects it when done."""
@@ -1074,6 +1168,7 @@ class Factory(AssistantMixin):
                 continue
             try:
                 self.machines[entry["id"]] = build_machine(entry, self.base_dir, self.simulate_machines)
+                self._attach_upload_dir(self.machines[entry["id"]])
             except (ImportError, MachineError, KeyError, OSError) as e:
                 self._event("error", f"Machine {entry['id']} from the registry could not be loaded: {e}")
                 continue
@@ -1132,12 +1227,7 @@ class Factory(AssistantMixin):
             history.pop(0)
 
     def state(self) -> dict:
-        machines = []
-        for m in list(self.machines.values()):
-            info = m.describe() | {"files": m.list_files()}
-            info.update(name=m.spec.get("name") or m.id, driver=type(m).__name__, stage=machine_stage(m),
-                        source=self.machine_source.get(m.id, "file"))
-            machines.append(info)
+        machines = [self._machine_view(m) | {"driver": type(m).__name__} for m in list(self.machines.values())]
         with self.lock:
             now = time.time()
             for info in machines:
@@ -1159,6 +1249,7 @@ class Factory(AssistantMixin):
                 "documents": sorted(self.documents.values(), key=lambda d: d["uploaded"], reverse=True),
                 "options": {"robot_kinds": sorted(ROBOT_KINDS), "connections": sorted(CONNECTIONS),
                             "machine_types": {k: v[0] for k, v in MACHINE_TYPES.items()}, "drivers": sorted(DRIVERS),
+                            "machine_catalog": MACHINE_CATALOG, "machine_prefix": PREFIX,
                             "priorities": sorted(PRIORITIES)},
                 "chat": list(self.chat[-150:]),
                 "products": self.products,

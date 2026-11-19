@@ -17,6 +17,8 @@ import re
 import time
 
 from ..model import ModelError
+from .catalog import machine_label
+from .machines import is_live
 
 DEFAULT_ASSISTANT = "StarForge AI"
 NONE = "none"
@@ -109,9 +111,13 @@ class AssistantMixin:
     # ------------------------------------------------------------------ entry point
 
     def chat_message(self, text: str, machine_id: str | None = None, robot_id: str | None = None,
-                     document_id: str | None = None) -> dict:
-        """Handles one chat message. Returns the new messages (the user's and the assistant's)."""
-        text = str(text or "").strip()[:2000]
+                     document_id: str | None = None, print_file: str | None = None) -> dict:
+        """Handles one chat message. Returns the new messages (the user's and the assistant's).
+
+        ``print_file``: a model file the user attached (already uploaded to ``machine_id``): print it now if the
+        machine is connected and free, otherwise report its state.
+        """
+        text = str(text or "").strip()[:2000] or ("Print this" if print_file else "")
         if not text:
             raise ValueError("message is empty")
         if machine_id and machine_id not in self.machines:
@@ -123,6 +129,13 @@ class AssistantMixin:
             if document_id not in self.documents:
                 raise KeyError(document_id)
             document = {k: self.documents[document_id][k] for k in ("id", "name")}
+        if print_file:
+            with self.lock:
+                first = self._chat_post("user", text, machine_id=machine_id, robot_id=robot_id, print_file=print_file)["id"]
+            reply = self._chat_print_attached(print_file, machine_id, robot_id)
+            with self.lock:
+                self._chat_post("assistant", reply, "reply")
+                return {"messages": [m for m in self.chat if m["id"] >= first], "choice": {"action": "print_attached"}}
         with self.lock:
             first = self._chat_post("user", text, machine_id=machine_id, robot_id=robot_id,
                                     document=document)["id"]
@@ -148,8 +161,8 @@ class AssistantMixin:
             state = "holding part" if holding and info["state"] == "idle" else info["state"]
             if info.get("progress_pct") is not None and info["state"] == "busy":
                 state += f" {info['progress_pct']}%"
-            machines.append({"id": m.id, "name": m.spec.get("name") or m.id, "zone": m.zone, "state": state,
-                             "files": m.list_files()})
+            machines.append({"id": m.id, "name": m.spec.get("name") or m.id, "type": machine_label(m.type),
+                             "live": is_live(m), "zone": m.zone, "state": state, "files": m.list_files()})
         # compact on purpose: every token here is read by the model on every message
         robots = [f"{r['id']} {r['status']} {r['zone'] or '?'} {r['battery']}%" for r in self.robots.values()]
         active = [self.run_view(r) for r in self.runs.values() if r["status"] in {"running", "paused"}]
@@ -198,10 +211,15 @@ class AssistantMixin:
             "quantity = how many). A complete product goes through every station in order.\n"
             "- answer: a question, greeting or anything else. Factory questions: answer from the factory data. "
             "Other questions (e.g. maths): just answer.\n"
+            "If the user asks to print or make something and no listed file matches it, use run_machine with file "
+            "\"none\" (the system then reports the printers and asks for the model file). Machines with live=true are "
+            "real hardware; the others are simulated.\n"
             "Only include the fields an action needs. 'reply' is your message to the user: short and direct, 1-2 "
             "sentences. Never end with a follow-up question or an offer of more help (no 'Is there anything else...', "
             "'Let me know if...'). If nothing can do a task, say what is missing (e.g. add a machine that has the file, "
-            "or add a robot). Do not invent IDs. JSON only.")
+            "or add a robot). Do not invent IDs. JSON only."
+            + ("\nFactory owner's instructions:\n- " + "\n- ".join(self.assistant_instructions)
+               if self.assistant_instructions else ""))
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": "Factory now:\n" + json.dumps(briefing, separators=(",", ":"))
                      + "\n\nRecent conversation:\n" + self._chat_history_text()
@@ -280,6 +298,9 @@ class AssistantMixin:
             [self.machines[choice["machine_id"]]] if choice.get("machine_id") in self.machines else [])
         candidates += [m for m in self.machines.values() if m not in candidates and not machine_id]
         with_file = [m for m in candidates if file in m.list_files()]
+        wants_print = bool(re.search(r"\bprint", text, re.I))
+        if not with_file and wants_print and any(m.type == "3d_printer" for m in self.machines.values()):
+            return self._printer_report(ask_for_file=True, thing=self._thing(text))
         if not with_file:
             where = f"{machine_id} has" if machine_id else "no machine has"
             known = sorted({f for m in self.machines.values() for f in m.list_files()})
@@ -328,6 +349,70 @@ class AssistantMixin:
         parts = ", ".join(f"{q}× {f}" for f, q in run["parts"].items())
         return self._join(said, f"Production run {run['id']} started: {quantity} × {name} ({parts} per unit). "
                                 "Follow it in the Production tab." + warning)
+
+    # ------------------------------------------------------------------ printing an attached model
+
+    def _printers(self, machine_id: str | None = None) -> list:
+        printers = [m for m in self.machines.values() if m.type == "3d_printer"]
+        if machine_id:
+            printers = [m for m in printers if m.id == machine_id] or printers
+        return sorted(printers, key=lambda m: (not is_live(m), m.id))
+
+    def _printer_line(self, m) -> tuple[str, bool]:
+        """Plain-language state of a printer, and whether it can start a print now."""
+        name = m.spec.get("name") or m.id
+        info, state = m.describe(), m.state()
+        kind = "connected" if is_live(m) else "simulated"
+        if state == "offline":
+            err = info.get("error")
+            return f"**{name}** is offline: it is not responding{f' ({err})' if err else ''}. Check it is on and on the same network.", False
+        if state == "error":
+            return f"**{name}** reports an error. Check the printer screen.", False
+        if state == "busy":
+            pct = info.get("progress_pct")
+            what = re.sub(r"\.gcode\.3mf$", "", info.get("job") or "a part", flags=re.I).replace("_", " ")
+            return f"**{name}** ({kind}) is busy printing {what}{f' ({pct}%)' if pct is not None else ''}.", False
+        if self._machine_holding(m.id):
+            return f"**{name}** ({kind}) has a finished part on the bed, waiting for a robot to collect it.", False
+        return f"**{name}** ({kind}) is idle and ready.", True
+
+    def _printer_report(self, ask_for_file: bool, thing: str = "") -> str:
+        lines = [self._printer_line(m)[0] for m in self._printers()]
+        if not lines:
+            return "There is no 3D printer yet. Add one in **Settings → Machines**."
+        ready = any(self._printer_line(m)[1] for m in self._printers())
+        text = "\n".join(lines)
+        if ask_for_file:
+            what = f" for the {thing}" if thing else ""
+            text += (f"\n\nI don't have a print file{what} yet. Attach the sliced model (.gcode.3mf) with 📎 and I'll "
+                     + ("print it right away." if ready else "print it as soon as a printer is free."))
+        return text
+
+    @staticmethod
+    def _thing(text: str) -> str:
+        m = re.search(r"\bprint(?:\s+(?:me|out|off))?\s+(?:a|an|the|some|my|this)?\s*([\w -]{2,40})", text, re.I)
+        return m.group(1).strip().rstrip(".!?") if m else ""
+
+    def _chat_print_attached(self, file: str, machine_id: str | None, robot_id: str | None) -> str:
+        printers = [m for m in self._printers(machine_id) if file in m.list_files()]
+        if not printers:
+            return f"I couldn't find {file} on a printer. Please attach it again."
+        free = [m for m in printers if self._printer_line(m)[1]]
+        if not free:
+            return "\n".join(self._printer_line(m)[0] for m in printers) + \
+                f"\n\n{file} is saved on the printer. Ask me to print it again when the printer is free."
+        m = free[0]
+        try:
+            job = self.print_file(m.id, file, robot_id)
+        except (ValueError, KeyError) as e:
+            return f"I couldn't start the print: {e}"
+        with self.lock:
+            self.jobs[job["id"]]["origin"] = "chat"
+        name = m.spec.get("name") or m.id
+        thing = re.sub(r"\.gcode\.3mf$", "", file, flags=re.I).replace("_", " ")
+        if job["status"] == "awaiting_confirmation":
+            return f"{name} is connected and ready. The print of {thing} is waiting for your approval (Activity → Jobs)."
+        return f"{name} is connected and ready. Printing **{thing}** now. When it's done, a robot will collect it."
 
     # ------------------------------------------------------------------ helpers
 

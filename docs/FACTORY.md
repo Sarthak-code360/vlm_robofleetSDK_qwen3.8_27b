@@ -135,6 +135,52 @@ hold its previous part. If the model is offline, simple keyword matching keeps t
 API: `POST /api/chat` `{"text", "machine_id"?, "robot_id"?, "document_id"?}`. The conversation is in `/api/state`
 under `chat`.
 
+## Machines
+
+robofleet knows these stationary machines (`robofleet/factory/catalog.py`). **3D printers (Bambu Lab) are live**;
+every other type runs as a realistic simulation until a real driver is added.
+
+| Category | Machines |
+|---|---|
+| Additive | 3D printer (FDM) — **live**, resin 3D printer (SLA/MSLA) |
+| Machining | CNC machine, CNC milling machine, CNC router, CNC lathe, lathe, drilling machine, surface grinder, wire EDM, band saw |
+| Cutting | CO2 laser cutter / engraver, fiber laser, CNC plasma cutter, waterjet, sheet metal shear |
+| Forming | press brake, hydraulic / stamping press, injection moulding machine, vacuum former, composite layup cell |
+| Joining | spot welder (battery packs), welding robot (MIG/TIG), SMT pick-and-place, reflow oven |
+| Assembly, finishing, quality, logistics | assembly station, heat-treatment furnace, paint / powder-coat booth, inspection / CMM, packaging station |
+
+Each type lists the inputs a job needs: the print file for a 3D printer; G-code and material for a CNC; cut file,
+material and thickness for a laser; pack layout, cell and nickel strip for a spot welder; and so on. Its stage
+sets the build order: 1 make parts, 2 assemble, 3 finish, 4 inspect, 5 pack.
+
+**Production with chosen machines.** In Production, step 4: enter the product and target quantity, then add
+machines one by one. Each machine shows its inputs. For the 3D printer, choose or upload the `.gcode.3mf`.
+If the factory has no machine of a chosen type yet, a simulated one is added automatically. Run Factory then makes
+the target quantity: the live printer prints for real, and the robots (simulated) collect and deliver the parts.
+
+API: `POST /api/runs` with `{"name", "target", "steps": [{"type" or "machine_id", "inputs": {...}}]}`;
+`POST /api/machines/ensure` `{"type"}` returns a machine of that type, creating a simulated one if needed.
+
+## Personalising StarForge AI
+
+Add instructions to the factory file. They are added to StarForge's instructions on every message:
+
+```json
+"assistant_name": "StarForge AI",
+"assistant_instructions": [
+  "You work for a small rocket workshop. The Bambu Lab A1 is the only real (live) machine.",
+  "Our printer uses PLA. Prints larger than 256 x 256 x 256 mm do not fit.",
+  "Answer in plain words for people who are not engineers."
+]
+```
+
+StarForge already receives the live factory state on every message: each machine with its type, whether it is
+live or simulated, its state and files, and the robots and production runs.
+
+**Printing from the chat.** "print a duck": if no file matches, StarForge reports each printer (idle, busy with
+progress, offline, or holding a part) and asks for the model. Attach the sliced `.gcode.3mf` with 📎 (it is stored
+on the printer) and send. If the printer is connected and free, it prints right away; otherwise StarForge says why.
+
 ## Operations dashboard
 
 `robofleet factory serve` serves the dashboard at `http://<host>:8080/`.

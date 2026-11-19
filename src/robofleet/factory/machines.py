@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from ..printers.chooser import list_print_files
+from .catalog import MACHINE_CATALOG
 
 
 class MachineError(RuntimeError):
@@ -117,31 +118,47 @@ class SimulatedPrinter(_TimedJob, _PrinterBase):
 
 
 class SimulatedStation(_TimedJob, Machine):
-    """Any other workstation (CNC, welding, composite layup, assembly, paint, inspection), simulated.
+    """Any other machine from the catalog (CNC, laser, lathe, welder, press, ...), simulated.
 
     ``files`` are the jobs/programs it can run, e.g. ``["engine_mount", "nozzle_insert"]``; each takes
-    ``cycle_seconds`` (default 20). A real driver for such a station implements the same Machine interface.
+    ``cycle_seconds`` (default 20). Files uploaded from the dashboard are kept in ``upload_dir`` (set by the
+    factory). A real driver for such a machine implements the same Machine interface.
     """
 
     def __init__(self, spec: dict, base_dir: Path):
         super().__init__(spec, base_dir)
         self.type = spec.get("type", "workstation")
+        self.upload_dir: Path | None = None
         self._init_timer(spec.get("cycle_seconds", spec.get("print_seconds", 20)))
 
     def list_files(self) -> list[str]:
-        return list(self.spec.get("files", []))
+        uploaded = [p.name for p in self.upload_dir.iterdir() if p.is_file() and not p.name.startswith(".")] \
+            if self.upload_dir and self.upload_dir.is_dir() else []
+        return sorted(set(self.spec.get("files", [])) | set(uploaded))
+
+    def file_details(self) -> list[dict]:
+        details = []
+        for name in self.list_files():
+            path = self.upload_dir / name if self.upload_dir else None
+            if path and path.is_file():
+                st = path.stat()
+                details.append({"name": name, "size": st.st_size, "modified": round(st.st_mtime, 1), "deletable": True})
+            else:
+                details.append({"name": name, "size": None, "modified": None, "deletable": False})
+        return details
 
 
 # Production order: a part made at a later stage needs every earlier-stage part of that unit delivered first.
-MACHINE_TYPES = {
-    "3d_printer": ("3D Printer", 1), "cnc_machine": ("CNC Machine", 1), "welding_station": ("Welding Station", 1),
-    "composite_cell": ("Composite Cell", 1), "assembly_station": ("Assembly Station", 2),
-    "paint_booth": ("Paint Booth", 3), "inspection_station": ("Inspection Station", 4),
-}
+MACHINE_TYPES = {k: (v["label"], v["stage"]) for k, v in MACHINE_CATALOG.items()}
 
 
 def machine_stage(machine: Machine) -> int:
     return int(machine.spec.get("stage") or MACHINE_TYPES.get(machine.type, ("", 1))[1])
+
+
+def is_live(machine: Machine) -> bool:
+    """True for machines connected to real hardware (not simulated)."""
+    return not isinstance(machine, (SimulatedPrinter, SimulatedStation))
 
 
 class BambuMachine(_PrinterBase):

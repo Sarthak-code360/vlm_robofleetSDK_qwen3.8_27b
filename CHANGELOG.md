@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-19
+
+### Added
+
+- Machine catalog (`robofleet/factory/catalog.py`): 30 stationary machine types (3D and resin printers, CNC
+  mill, router and lathe, lathe, drill, grinder, wire EDM, saw, CO2 and fiber lasers, plasma, waterjet, shear,
+  press brake, presses, injection moulding, vacuum former, composite cell, spot welder, welding robot, pick-and-place,
+  reflow oven, assembly, heat treatment, paint, inspection, packaging). Each has its inputs and stage. 3D printers are
+  live; the rest are simulated.
+- Production step 4: choose machines (several) and fill in each machine's inputs. A 3D printer asks for the
+  `.gcode.3mf` (choose or upload). Runs accept `steps`. Missing machine types are added as simulated machines
+  (`POST /api/machines/ensure`).
+- Simulated machines accept uploaded job files of their type (DXF, G-code, ...), kept in `<data-dir>/jobs/`.
+- StarForge AI printing: "print a duck" reports every printer's state and asks for the model file. A `.gcode.3mf`
+  attached with 📎 is stored on the printer and printed at once if it is connected and free (`print_file` in
+  `/api/chat`).
+- `assistant_instructions` in the factory file personalise StarForge AI. Machines in its briefing now include their
+  type and whether they are live.
+
+### Fixed
+
+- `.gitignore` ignored `src/robofleet/factory/static/three/build/`, so the 3D viewer was missing from the repository.
+
 ## [0.8.0] - 2026-11-18
 
 ### Added

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robofleet"
-version = "0.8.0"
+version = "0.9.0"
 description = "Coordinate robot fleets (factory, warehouse, hotel) with a vision-language model, plus Bambu Lab 3D printer control."
 readme = "README.md"
 license = "MIT"

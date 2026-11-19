@@ -466,6 +466,97 @@ class ShowcaseTest(unittest.TestCase):
         self.assertTrue(factory.showcase["path"].endswith("model/rocket_assembly.glb"))
 
 
+class MachineCatalogTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.data = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_catalog_types_and_auto_machines(self):
+        from robofleet.factory.catalog import MACHINE_CATALOG
+        for key in ("3d_printer", "cnc_mill", "cnc_lathe", "lathe", "drill_press", "laser_cutter", "fiber_laser",
+                    "spot_welder", "press_brake", "injection_molding", "waterjet", "packaging_station"):
+            self.assertIn(key, MACHINE_CATALOG)
+        factory = make_factory(None, data_dir=self.data)
+        laser = factory.ensure_machine("laser_cutter")
+        self.assertEqual((laser["id"], laser["live"], laser["type_label"]), ("LASER-001", False, "CO2 Laser Cutter / Engraver"))
+        self.assertEqual(factory.ensure_machine("laser_cutter")["id"], "LASER-001")  # reused, not duplicated
+        self.assertEqual(factory.ensure_machine("3d_printer")["id"], "PRINTER-1")    # the existing printer
+        with self.assertRaises(ValueError):
+            factory.ensure_machine("time_machine")
+
+    def test_upload_to_simulated_machine_checks_file_type(self):
+        factory = make_factory(None, data_dir=self.data)
+        mid = factory.ensure_machine("laser_cutter")["id"]
+        good, bad = self.data / "panel.dxf", self.data / "panel.exe"
+        good.write_text("0\nSECTION"); bad.write_text("x")
+        self.assertEqual(factory.add_machine_file(mid, "panel.dxf", good)["name"], "panel.dxf")
+        with self.assertRaisesRegex(ValueError, "takes"):
+            factory.add_machine_file(mid, "panel.exe", bad)
+        self.assertIn("panel.dxf", factory.machines[mid].list_files())
+
+    def test_run_from_chosen_machines_with_inputs(self):
+        factory = make_factory(None, data_dir=self.data, robots=[])
+        factory.sim_speed_m_s, factory.sim_handling_s, factory.sim_interval_s = 1000, 0, 0.02
+        factory.add_robots({"name": "Rover", "home_zone": "Park", "count": 2})
+        mid = factory.ensure_machine("spot_welder")["id"]
+        factory.machines[mid].print_seconds = 0
+        with self.assertRaisesRegex(ValueError, "Pack layout is required"):
+            factory.start_run({"name": "Battery", "target": 1, "steps": [{"machine_id": mid, "inputs": {}}]})
+        with self.assertRaisesRegex(ValueError, "upload it first"):
+            factory.start_run({"name": "Duck", "target": 1, "steps": [{"type": "3d_printer", "inputs": {"file": "duck.gcode.3mf"}}]})
+        run = factory.start_run({"name": "Battery pack", "target": 2, "approve_each_job": False, "steps": [
+            {"type": "3d_printer", "inputs": {"file": "actuator_gear.gcode.3mf"}},
+            {"machine_id": mid, "inputs": {"pack": "4S2P", "cell": "21700", "pulses": "2"}}]})
+        self.assertEqual(run["parts"], {"actuator_gear.gcode.3mf": 1, "4S2P": 1})
+        self.assertEqual(run["steps"][1]["inputs"]["pulses"], 2.0)
+        self.assertEqual(sorted(run["machines"]), sorted(["PRINTER-1", mid]))
+        try:
+            for _ in range(300):
+                factory.tick()
+                if factory.runs[run["id"]]["status"] == "completed":
+                    break
+                time.sleep(0.02)
+            self.assertEqual(factory.runs[run["id"]]["status"], "completed", factory.events[-4:])
+        finally:
+            factory.stop_simulated_robots()
+
+
+class ChatPrintingTest(unittest.TestCase):
+    def test_print_unknown_thing_reports_printers_and_asks_for_file(self):
+        factory = make_factory(None)
+        reply = factory.chat_message("can you print a duck")["messages"][-1]["text"]
+        self.assertIn("is idle and ready", reply)
+        self.assertIn("print file for the duck", reply)
+        self.assertIn(".gcode.3mf", reply)
+        self.assertFalse(factory.jobs)  # nothing started
+
+    def test_attached_model_prints_when_printer_is_free(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            machines = [dict(CONFIG["machines"][0], prints_dir=tmp, print_seconds=5)]
+            factory = make_factory(None, machines=machines, require_confirmation=False)
+            (Path(tmp) / "duck.gcode.3mf").write_bytes(b"PK\x03\x04")
+            reply = factory.chat_message("print this", machine_id="PRINTER-1", print_file="duck.gcode.3mf")["messages"][-1]["text"]
+            self.assertIn("Printing **duck** now", reply)
+            self.assertTrue(wait_for(lambda: any(j["status"] == "running" for j in factory.jobs.values())))
+            busy = factory.chat_message("print this", print_file="duck.gcode.3mf")["messages"][-1]["text"]
+            self.assertIn("busy printing duck", busy)  # the printer is taken: report, do not queue silently
+
+    def test_owner_instructions_reach_the_model(self):
+        seen = {}
+
+        class Spy(FakeModel):
+            def chat_json(self, messages, schema, name, timeout=None, max_tokens=None):
+                seen["system"] = messages[0]["content"]
+                return {"action": "answer", "reply": "4"}, {"latency_s": 0}
+
+        factory = make_factory(Spy(), assistant_instructions=["Our printers use PLA only."])
+        self.assertEqual(factory.chat_message("what is 2+2")["messages"][-1]["text"], "4")
+        self.assertIn("Our printers use PLA only.", seen["system"])
+
+
 class SimulateRobotsTest(unittest.TestCase):
     def test_file_robots_come_online(self):
         factory = make_factory(None)

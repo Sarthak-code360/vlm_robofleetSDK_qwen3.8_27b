@@ -217,6 +217,11 @@ pre.cmd{margin:8px 0 0;padding:10px 12px;background:#ffffff;border:1px solid var
 .file-chip .meta span{color:var(--muted);font-size:12.5px}
 .x-btn{background:none;border:0;color:var(--muted);font-size:22px;cursor:pointer;padding:0 4px;line-height:1}.x-btn:hover{color:var(--strong)}
 .parts{display:grid;gap:8px}
+.step-cards{display:grid;gap:12px}
+.step-card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#fff}
+.step-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.step-top .badge{margin-left:auto}
+.stage-pill{width:24px;height:24px;border-radius:50%;background:#f1efff;color:var(--accent);display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
 .part-row{display:grid;grid-template-columns:auto minmax(0,1fr) 74px;gap:10px;align-items:center}
 .part-row input[type=number]{padding:5px 8px}
 .btn.run{width:100%;justify-content:center;padding:14px;font-size:16px;font-weight:600;border-radius:10px;margin-top:24px;background:var(--accent);border-color:var(--accent);color:#fff}
@@ -575,7 +580,17 @@ const LABELS = {
 const KINDS = {mobile_manipulator:"Mobile Manipulator", robotic_arm:"Robotic Arm", amr:"Autonomous Mobile Robot", humanoid:"Humanoid", other:"Other"};
 const MTYPES = {"3d_printer": "3D Printer", cnc_machine: "CNC Machine", welding_station: "Welding Station", composite_cell: "Composite Cell",
                 assembly_station: "Assembly Station", paint_booth: "Paint Booth", inspection_station: "Inspection Station"};
-const STAGE_LABEL = {1: "Make parts", 2: "Assemble", 3: "Paint", 4: "Inspect"};
+const STAGE_LABEL = {1: "Make parts", 2: "Assemble", 3: "Finish", 4: "Inspect", 5: "Pack"};
+const catalog = () => (S && S.options && S.options.machine_catalog) || {};
+function catalogOptions(selected, placeholder) {
+  const groups = {};
+  Object.entries(catalog()).forEach(([k, v]) => (groups[v.category] = groups[v.category] || []).push([k, v]));
+  return (placeholder ? `<option value="">${esc(placeholder)}</option>` : "") + Object.entries(groups).map(([g, items]) =>
+    `<optgroup label="${esc(g)}">${items.map(([k, v]) => {
+      const live = S.machines.find(m => m.type === k && m.live);
+      return `<option value="${esc(k)}" ${k === selected ? "selected" : ""}>${esc(v.label)}${live ? `  ● live: ${esc(live.name)}` : ""}</option>`;
+    }).join("")}</optgroup>`).join("");
+}
 const DRIVERS = {simulated:"Simulated (digital twin)", bambu:"Bambu Lab (LAN)"};
 const DRIVER_CLASS = {SimulatedPrinter:"Digital twin", BambuMachine:"Bambu Lab LAN"};
 const badge = (group, s) => { const [t, c] = LABELS[group][s] || [s, "grey"]; return `<span class="badge s-${c}">${esc(t)}</span>`; };
@@ -604,6 +619,7 @@ async function refresh() {
 }
 function render() {
   const f = S.factory;
+  Object.entries(catalog()).forEach(([k, v]) => { MTYPES[k] = v.label; });
   $("#site-sub").textContent = f.name || "";
   document.querySelectorAll(".assistant-name").forEach(el => { if (el.textContent !== f.assistant) el.textContent = f.assistant; });
   renderAssistantState(); syncComposers();
@@ -645,7 +661,7 @@ function composerHTML(kind) {
   return `<div class="composer-box"><div class="att" hidden></div>
     <textarea rows="1" name="text" placeholder="${esc(ph)}"></textarea>
     <div class="composer-row">
-      <label class="icon-btn" title="Attach a process PDF">${CLIP}<input type="file" accept="application/pdf,.pdf" hidden></label>
+      <label class="icon-btn" title="Attach a 3D print file (.gcode.3mf) or a process PDF">${CLIP}<input type="file" accept=".3mf,application/pdf,.pdf" hidden></label>
       <select data-pick="machine" title="Machine"></select><select data-pick="robot" title="Robot"></select>
       <button class="send" type="submit" aria-label="Send">${SEND}</button></div></div>`;
 }
@@ -657,7 +673,20 @@ function initComposers() {
     ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } });
     form.querySelector("input[type=file]").addEventListener("change", async e => {
       const file = e.target.files[0]; e.target.value = ""; if (!file) return;
-      try { const d = await uploadDoc(file); chatState.doc = {id: d.id, name: d.name}; syncComposers(true); } catch (err) { toast(err.message, "bad"); }
+      try {
+        if (/\.3mf$/i.test(file.name)) {   // a model to print: store it on the chosen (or first live) 3D printer
+          const pick = form.querySelector('[data-pick=machine]').value;
+          const printers = S.machines.filter(m => m.type === "3d_printer").sort((a, b) => b.live - a.live);
+          const printer = printers.find(m => m.id === pick) || printers[0];
+          if (!printer) throw new Error("There is no 3D printer. Add one in Settings → Machines.");
+          chatState.print = {machine_id: printer.id, name: file.name, uploading: 0}; syncComposers(true);
+          const res = await uploadMachineFile(printer.id, file, pct => { chatState.print.uploading = pct; syncComposers(true); });
+          chatState.print = {machine_id: printer.id, name: res.name}; chatState.doc = null;
+        } else {
+          const d = await uploadDoc(file); chatState.doc = {id: d.id, name: d.name}; chatState.print = null;
+        }
+        syncComposers(true);
+      } catch (err) { chatState.print = null; syncComposers(true); toast(err.message, "bad"); }
     });
     form.addEventListener("submit", e => { e.preventDefault(); sendChat(form); });
   });
@@ -675,16 +704,22 @@ function syncComposers(force) {
       ms.value = [...ms.options].some(o => o.value === mv) ? mv : ""; rs.value = [...rs.options].some(o => o.value === rv) ? rv : "";
     }
     const att = form.querySelector(".att");
-    att.hidden = !chatState.doc;
-    att.innerHTML = chatState.doc ? `<span class="tag">PDF</span><b>${esc(chatState.doc.name)}</b><button type="button" data-action="chat-clear-doc" aria-label="Remove">×</button>` : "";
+    const pr = chatState.print;
+    att.hidden = !chatState.doc && !pr;
+    att.innerHTML = pr ? `<span class="tag">3MF</span><b>${esc(pr.name)}</b>${pr.uploading != null ? ` <span class="muted">uploading ${pr.uploading}%</span>` : ""}<button type="button" data-action="chat-clear-doc" aria-label="Remove">×</button>`
+      : chatState.doc ? `<span class="tag">PDF</span><b>${esc(chatState.doc.name)}</b><button type="button" data-action="chat-clear-doc" aria-label="Remove">×</button>` : "";
     form.querySelector(".send").disabled = chatState.sending;
   });
 }
 async function sendChat(form) {
-  const ta = form.querySelector("textarea"), text = ta.value.trim();
+  const ta = form.querySelector("textarea"), pr = chatState.print;
+  if (pr && pr.uploading != null) return toast("Wait for the upload to finish", "bad");
+  const text = ta.value.trim() || (pr ? `Print ${fileLabel(pr.name)}` : "");
   if (!text || chatState.sending) return;
-  const body = {text, machine_id: form.querySelector('[data-pick=machine]').value || null,
-                robot_id: form.querySelector('[data-pick=robot]').value || null, document_id: chatState.doc ? chatState.doc.id : null};
+  const body = {text, machine_id: pr ? pr.machine_id : form.querySelector('[data-pick=machine]').value || null,
+                robot_id: form.querySelector('[data-pick=robot]').value || null, document_id: chatState.doc ? chatState.doc.id : null,
+                print_file: pr ? pr.name : null};
+  chatState.print = null;
   ta.value = ""; ta.style.height = "auto"; chatState.doc = null;
   form.querySelector('[data-pick=machine]').value = ""; form.querySelector('[data-pick=robot]').value = "";
   if (!await postChat(body)) ta.value = text;
@@ -709,7 +744,7 @@ function rerenderChat() {
 function msgHTML(m) {
   const name = esc(S.factory.assistant);
   if (m.role === "user") {
-    const tags = [m.machine_id && `Machine ${m.machine_id}`, m.robot_id && `Robot ${m.robot_id}`, m.document && `PDF ${m.document.name}`].filter(Boolean);
+    const tags = [m.print_file && `3MF ${m.print_file}`, m.machine_id && `Machine ${m.machine_id}`, m.robot_id && `Robot ${m.robot_id}`, m.document && `PDF ${m.document.name}`].filter(Boolean);
     return `<div class="msg user"><div class="bubble">${esc(m.text)}${tags.length ? `<div class="tags">${tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}</div></div>`;
   }
   const head = m.kind === "reply" ? `<div class="who"><b>${name}</b> · ${fmtTime(m.ts)}${m.latency_s ? ` · ${m.latency_s}s` : ""}</div>`
@@ -847,56 +882,116 @@ function renderProduction() {
   const types = {};
   S.machines.forEach(m => { const t = MTYPES[m.type] || m.type; types[t] = (types[t] || 0) + 1; });
   $("#setup-machines").innerHTML = `<div><div class="k">Number of Machines</div><span class="num-chip">${S.machines.length}</span></div>
-    <div><div class="k">Types</div><div class="v">${esc(Object.entries(types).map(([t, n]) => `${t} (${n})`).join(", ") || "—")}</div>
+    <div><div class="k">Types</div><div class="v">${esc((e => e.slice(0, 3).map(([t, n]) => `${t} (${n})`).join(", ") + (e.length > 3 ? ` +${e.length - 3} more` : ""))(Object.entries(types)) || "—")}</div>
     <div class="muted" style="font-size:12.5px;margin-top:4px">${S.machines.filter(m => m.state === "busy").length} running · <button type="button" class="link" data-tab="machines">Manage machines</button></div></div>`;
-  // 4. product + actions
-  const stageOf = f => Math.min(...S.machines.filter(m => m.files.includes(f)).map(m => m.stage || 1));
-  const files = [...new Set(S.machines.flatMap(m => m.files))].sort((a, b) => stageOf(a) - stageOf(b) || a.localeCompare(b));
-  const real = S.machines.some(m => m.driver !== "SimulatedPrinter");
-  if (changed("product", [locked && run.id, files, Object.keys(S.zones)])) {
+  // 4. product, target, machines and their inputs
+  setup.steps = Array.isArray(setup.steps) ? setup.steps.filter(st => S.machines.some(m => m.id === st.machine_id)) : [];
+  const steps = setup.steps;
+  const files = [...new Set(S.machines.flatMap(m => m.files))];
+  const real = steps.some(st => (S.machines.find(m => m.id === st.machine_id) || {}).live);
+  const filesSig = steps.map(st => (S.machines.find(m => m.id === st.machine_id) || {}).files);
+  if (changed("product", [locked && run.id, steps.map(st => [st.machine_id, st.type]), filesSig, Object.keys(catalog()).length])) {
     if (locked) {
+      const rows = (run.steps && run.steps.length)
+        ? run.steps.map(st => `<b>${esc(st.label)}</b>${st.live ? ' <span class="badge s-green">live</span>' : ""}<br><span class="muted">${esc(fileLabel(st.job))}${Object.entries(st.inputs).filter(([k]) => k !== "file").map(([k, v]) => ` · ${esc(v)}`).join("")}</span>`).join("<br>")
+        : Object.entries(run.parts).map(([f, q]) => `${q}× ${esc(fileLabel(f))}`).join("<br>");
       $("#setup-product").innerHTML = `<dl class="kv" style="margin:0"><dt>Product</dt><dd>${esc(run.name)}</dd><dt>Target</dt><dd>${run.target} units</dd>
-        <dt>Parts per unit</dt><dd style="white-space:normal">${Object.entries(run.parts).map(([f, q]) => `${q}× ${esc(fileLabel(f))}`).join("<br>")}</dd>
-        <dt>Deliver to</dt><dd>${esc(run.deliver_to)}</dd><dt>Machine starts</dt><dd>${run.approve_each_job ? "Approved by an operator" : "Automatic"}</dd></dl>`;
+        <dt>Machines</dt><dd style="white-space:normal">${rows}</dd><dt>Machine starts</dt><dd>${run.approve_each_job ? "Approved by an operator" : "Automatic"}</dd></dl>`;
     } else {
-      const zones = Object.keys(S.zones), parts = setup.parts || {};
       $("#setup-product").innerHTML = `
         <div class="form-grid">
-          <label class="field full"><span>Product / task name</span><input type="text" name="name" maxlength="60" list="product-list" placeholder="e.g. Sounding Rocket" value="${esc(setup.name || "")}">
-            <datalist id="product-list">${Object.keys(S.products || {}).map(n => `<option value="${esc(n)}">`).join("")}</datalist>
-            ${Object.keys(S.products || {}).length ? `<small>Pick a product (${esc(Object.keys(S.products).join(", "))}) and its parts fill in.</small>` : ""}</label>
-          <label class="field"><span>Target quantity</span><input type="number" name="target" min="1" max="100000" value="${esc(setup.target || 10)}"></label>
-          <label class="field"><span>Deliver finished parts to</span><select name="deliver_to">${zones.map(z => `<option ${z === (setup.deliver_to || S.factory.default_output_zone) ? "selected" : ""}>${esc(z)}</option>`).join("")}</select></label>
+          <label class="field"><span>Product / task name</span><input type="text" name="name" maxlength="60" list="product-list" placeholder="e.g. Rubber duck" value="${esc(setup.name || "")}">
+            <datalist id="product-list">${Object.keys(S.products || {}).map(n => `<option value="${esc(n)}">`).join("")}</datalist></label>
+          <label class="field"><span>Target quantity</span><input type="number" name="target" min="1" max="100000" value="${esc(setup.target || 1)}"></label>
+          <label class="field full"><span>Machines</span><select id="add-step">${catalogOptions("", steps.length ? "+ Add another machine…" : "+ Choose a machine…")}</select>
+            <small>Choose one or more. Only connected machines (● live) run for real; the others are simulated.</small></label>
         </div>
-        <div class="field"><span class="muted" style="font-size:12px;font-weight:500">Parts per unit</span>
-          <div class="parts">${files.length ? files.map(f => `<label class="part-row"><input type="checkbox" data-part="${esc(f)}" ${parts[f] ? "checked" : ""}>
-            <span style="overflow:hidden;text-overflow:ellipsis">${esc(fileLabel(f))} <span class="faint" style="font-size:11.5px">${esc(MTYPES[(S.machines.find(m => m.files.includes(f)) || {}).type] || "")}</span></span>
-            <input type="number" min="1" max="100" data-qty="${esc(f)}" value="${esc(parts[f] || 1)}" title="Quantity per unit"></label>`).join("")
-            : `<span class="muted">No job files on any machine yet.</span>`}</div>
-          <small class="faint">Leave all unticked to let the orchestrator choose the parts from the product name.</small></div>
-        <label class="check"><input type="checkbox" name="approve" ${(setup.approve ?? real) ? "checked" : ""}><span>Operator approves every machine start${real ? " (recommended for real printers)" : ""}</span></label>`;
+        <div class="step-cards">${steps.length ? steps.map((st, i) => stepCard(st, i)).join("")
+          : `<div class="muted" style="font-size:12.5px">${Object.keys(S.products || {}).length ? `No machines chosen. Type a product from the catalog (${esc(Object.keys(S.products).join(", "))}) to use its recipe, or add machines above.` : "Add the machines this product needs."}</div>`}</div>
+        <label class="check"><input type="checkbox" name="approve" ${(setup.approve ?? real) ? "checked" : ""}><span>Operator approves every machine start${real ? " (recommended for live machines: check the bed is clear)" : ""}</span></label>`;
+      $("#add-step").onchange = async e => {
+        const type = e.target.value; if (!type) return;
+        e.target.disabled = true;
+        try {
+          const m = await api("/api/machines/ensure", {body: {type}});
+          const inputs = {};
+          (catalog()[type].inputs || []).forEach(fd => { if (fd.default != null && fd.kind !== "file") inputs[fd.key] = fd.default; });
+          setup.steps.push({type, machine_id: m.id, inputs}); saveSetup(); sig.product = ""; await refresh();
+        } catch (err) { toast(err.message, "bad"); e.target.disabled = false; }
+      };
       $("#setup-product").oninput = e => {
-        const f = $("#setup-form");
-        const prod = e && e.target === f.elements.name && Object.entries(S.products || {}).find(([n]) => n.toLowerCase() === f.elements.name.value.trim().toLowerCase());
-        if (prod) document.querySelectorAll("[data-part]").forEach(cb => {
-          const q = prod[1].parts[cb.dataset.part]; cb.checked = !!q;
-          if (q) document.querySelector(`[data-qty="${CSS.escape(cb.dataset.part)}"]`).value = q;
-        });
-        Object.assign(setup, {name: f.elements.name.value, target: Number(f.elements.target.value) || 1, deliver_to: f.deliver_to.value, approve: f.approve.checked, parts: {}});
-        document.querySelectorAll("[data-part]").forEach(cb => { if (cb.checked) setup.parts[cb.dataset.part] = Number(document.querySelector(`[data-qty="${CSS.escape(cb.dataset.part)}"]`).value) || 1; });
+        const f = $("#setup-form"), el = e && e.target;
+        if (el && el.dataset.step != null) {
+          const st = setup.steps[Number(el.dataset.step)];
+          if (st) { st.inputs = st.inputs || {}; st.inputs[el.dataset.key] = el.value; }
+        }
+        Object.assign(setup, {name: f.elements.name.value, target: Number(f.elements.target.value) || 1, approve: f.approve.checked});
         saveSetup();
       };
+      document.querySelectorAll("[data-step-upload]").forEach(inp => inp.onchange = async () => {
+        const file = inp.files[0], i = Number(inp.dataset.stepUpload), st = setup.steps[i]; inp.value = "";
+        if (!file || !st) return;
+        const label = document.querySelector(`[data-upload-status="${i}"]`);
+        try {
+          const res = await uploadMachineFile(st.machine_id, file, pct => { label.textContent = `Uploading… ${pct}%`; });
+          st.inputs.file = res.name; saveSetup(); toast(`Uploaded ${fileLabel(res.name)}`, "ok"); sig.product = ""; await refresh();
+        } catch (err) { label.textContent = ""; toast(err.message, "bad"); }
+      });
     }
   }
+  document.querySelectorAll("[data-state-of]").forEach(el => {
+    const m = S.machines.find(x => x.id === el.dataset.stateOf);
+    if (m) { const [t, c] = LABELS.machine[m.state] || [m.state, "grey"]; el.className = `badge s-${c}`; el.textContent = t; }
+  });
   if (changed("actions", [locked && run.id, run && run.status])) {
     $("#setup-actions").innerHTML = !locked
-      ? `<button class="btn run" id="run-btn" ${files.length ? "" : "disabled"}>${PLAY} Run Factory</button>`
+      ? `<button class="btn run" id="run-btn" ${files.length || steps.length ? "" : "disabled"}>${PLAY} Run Factory</button>`
       : `<div class="run-controls">${run.status === "running"
             ? `<button type="button" class="btn" data-action="run-pause" data-id="${esc(run.id)}">Pause</button>`
             : `<button type="button" class="btn primary" data-action="run-resume" data-id="${esc(run.id)}">${PLAY} Resume</button>`}
           <button type="button" class="btn danger" data-action="run-stop" data-id="${esc(run.id)}">Stop Run</button></div>`;
   }
   renderRunPanel(shown);
+}
+
+function stepCard(st, i) {
+  const m = S.machines.find(x => x.id === st.machine_id) || {}, cat = catalog()[st.type] || {inputs: []};
+  const field = fd => {
+    const v = (st.inputs || {})[fd.key] ?? "", attrs = `data-step="${i}" data-key="${esc(fd.key)}"`;
+    if (fd.kind === "file") {
+      const exts = fd.accept.split(",").map(x => x.trim().toLowerCase());
+      const onMachine = (m.files || []).filter(f => exts.some(x => f.toLowerCase().endsWith(x)));
+      return `<label class="field full"><span>${esc(fd.label)}${fd.required ? "" : " (optional)"}</span>
+        <div style="display:flex;gap:8px;align-items:center"><select ${attrs} style="flex:1"><option value="">${onMachine.length ? "Choose a file on the machine…" : "No files yet: upload one →"}</option>
+          ${onMachine.map(f => `<option value="${esc(f)}" ${f === v ? "selected" : ""}>${esc(f)}</option>`).join("")}</select>
+          <label class="btn sm" style="flex:none">Upload<input type="file" accept="${esc(fd.accept)}" data-step-upload="${i}" hidden></label></div>
+        <small data-upload-status="${i}">${esc(fd.accept)}</small></label>`;
+    }
+    if (fd.kind === "select")
+      return `<label class="field"><span>${esc(fd.label)}</span><select ${attrs}>${fd.options.map(o => `<option ${o === (v || fd.default) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`;
+    if (fd.kind === "number")
+      return `<label class="field"><span>${esc(fd.label)}${fd.unit ? ` (${esc(fd.unit)})` : ""}</span><input type="number" step="any" ${attrs} value="${esc(v)}" ${fd.required ? "required" : ""}></label>`;
+    return `<label class="field"><span>${esc(fd.label)}</span><input type="text" ${attrs} value="${esc(v)}" placeholder="${esc(fd.placeholder || "")}" ${fd.required ? "required" : ""}></label>`;
+  };
+  return `<div class="step-card">
+    <div class="step-top"><span class="stage-pill" title="${esc(STAGE_LABEL[cat.stage] || "")}">${cat.stage || 1}</span>
+      <div style="min-width:0"><b>${esc(cat.label || st.type)}</b><div class="muted" style="font-size:12px">${esc(m.name || st.machine_id)} · ${m.live ? "live" : "simulated"}</div></div>
+      <span class="badge s-grey" data-state-of="${esc(st.machine_id)}"></span>
+      <button type="button" class="x-btn" data-action="step-remove" data-id="${i}" aria-label="Remove">×</button></div>
+    ${cat.inputs.length ? `<div class="form-grid">${cat.inputs.map(field).join("")}</div>` : '<div class="muted" style="font-size:12.5px">No inputs needed.</div>'}</div>`;
+}
+function uploadMachineFile(machineId, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/machines/${encodeURIComponent(machineId)}/files`);
+    Object.entries(AUTH).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(Math.round(100 * e.loaded / e.total)); };
+    xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch (e) {}
+      xhr.status === 200 ? resolve(j) : reject(new Error(j.error || `Upload failed (${xhr.status})`)); };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.send(file);
+  });
 }
 
 function renderRunPanel(run) {
@@ -947,10 +1042,10 @@ function renderRunPanel(run) {
 
 async function startRun() {
   const f = $("#setup-form"), btn = $("#run-btn");
-  const parts = {};
-  document.querySelectorAll("[data-part]").forEach(cb => { if (cb.checked) parts[cb.dataset.part] = Number(document.querySelector(`[data-qty="${CSS.escape(cb.dataset.part)}"]`).value) || 1; });
-  const body = {name: f.elements.name.value.trim(), target: Number(f.elements.target.value), deliver_to: f.deliver_to.value,
-                document_id: setup.docId || null, parts, approve_each_job: f.approve.checked};
+  const steps = (setup.steps || []).map(st => ({machine_id: st.machine_id, type: st.type, inputs: st.inputs || {}}));
+  const body = {name: f.elements.name.value.trim(), target: Number(f.elements.target.value) || 1,
+                document_id: setup.docId || null, approve_each_job: f.approve.checked};
+  if (steps.length) body.steps = steps;
   if (!body.name) { toast("Enter the product or task name", "bad"); f.elements.name.focus(); return; }
   btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Planning production…`;
   try {
@@ -1209,7 +1304,7 @@ function dlgAddMachine() {
     <div class="form-grid">
       <label class="field"><span>Name</span><input type="text" name="name" maxlength="60" placeholder="e.g. Printer 2" required></label>
       <label class="field"><span>Location</span><select name="zone">${zoneOpts(Object.keys(S.zones).find(z => /print/i.test(z)))}</select></label>
-      <label class="field"><span>Type</span><select name="type">${opts(MTYPES, "3d_printer")}</select></label>
+      <label class="field"><span>Type</span><select name="type">${catalogOptions("3d_printer")}</select></label>
       <label class="field"><span>Connection</span><select name="driver"><option value="simulated">Simulated, for testing</option><option value="bambu">Bambu Lab printer</option></select></label>
       <label class="field full" data-drv="simulated"><span>What it can make</span><input type="text" name="files" value="rocket_fin.gcode.3mf"><small>Comma-separated, e.g. rocket_fin.gcode.3mf or engine_mount</small></label>
       <label class="field" data-drv="bambu"><span>IP address</span><input type="text" name="ip" placeholder="192.168.1.50"></label>
@@ -1229,27 +1324,33 @@ function dlgAddMachine() {
       await api("/api/machines", {body}); toast(`Added ${body.name || body.id}`, "ok"); refresh();
     });
   const f = $("#dlg-form"), E = f.elements;
-  const PREFIX = {"3d_printer": "PRINTER", cnc_machine: "CNC", welding_station: "WELD", composite_cell: "COMP", assembly_station: "ASSY", paint_booth: "PAINT", inspection_station: "QA"};
+  const PREFIX = (S.options && S.options.machine_prefix) || {};
   const sync = () => {
     const printer = E.type.value === "3d_printer";
     E.driver.querySelector('[value=bambu]').disabled = !printer;
     if (!printer) E.driver.value = "simulated";
     document.querySelectorAll("#dlg [data-drv]").forEach(el => el.hidden = el.dataset.drv !== E.driver.value);
+    E.files.closest("label").hidden = !(printer && E.driver.value === "simulated");   // other machines get their jobs in Production
   };
   E.type.onchange = () => {
     E.id.value = nextId(PREFIX[E.type.value] || "M", S.machines.map(m => m.id));
-    E.files.value = E.type.value === "3d_printer" ? "rocket_fin.gcode.3mf" : "";
-    E.files.placeholder = E.type.value === "3d_printer" ? "" : "e.g. engine_mount, nozzle_insert";
+    E.files.value = E.type.value === "3d_printer" ? "rocket_fin.gcode.3mf" : `${E.type.value}_job`;
+    if (!E.name.value || E.name.dataset.auto) { E.name.value = MTYPES[E.type.value] || ""; E.name.dataset.auto = "1"; }
     sync();
   };
+  E.name.oninput = () => { delete E.name.dataset.auto; };
   E.driver.onchange = sync; sync();
 }
+const accepts = type => ((catalog()[type] || {}).inputs || []).filter(fd => fd.kind === "file").map(fd => fd.accept).join(",");
 async function dlgMachineFiles(id) {
   const m = S.machines.find(x => x.id === id); if (!m) return;
   openDialog(m.name, `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">${badge("machine", m.state)}<span class="muted">${esc(m.zone)} · ${esc(MTYPES[m.type] || m.type)}</span></div>
     ${m.type === "3d_printer" ? `<label class="drop" id="pf-drop"><input type="file" accept=".3mf" id="pf-input" hidden>
       <b>Upload a print file</b> from this computer<br><span class="faint">Sliced in Bambu Studio: File → Export → Export plate sliced file (.gcode.3mf)</span>
+      <div class="upload-bar" id="pf-bar" hidden><i></i></div></label>`
+      : accepts(m.type) ? `<label class="drop" id="pf-drop"><input type="file" accept="${esc(accepts(m.type))}" id="pf-input" hidden>
+      <b>Upload a job file</b> from this computer<br><span class="faint">${esc(accepts(m.type))}${m.live ? "" : " · simulated machine"}</span>
       <div class="upload-bar" id="pf-bar" hidden><i></i></div></label>` : ""}
     <div class="k-label" style="margin:18px 0 4px">${m.type === "3d_printer" ? "Files on this machine" : "Jobs this station can run"}</div>
     <div id="pf-list"><div class="muted">Loading…</div></div>`, `<button class="btn primary" value="cancel">Done</button>`, null);
@@ -1266,7 +1367,7 @@ async function dlgMachineFiles(id) {
   };
   dlg._reloadFiles = list;
   const upload = file => new Promise(resolve => {
-    if (!/\.gcode\.3mf$/i.test(file.name)) { toast("Choose a sliced .gcode.3mf file", "bad"); return resolve(); }
+    if (m.type === "3d_printer" && !/\.gcode\.3mf$/i.test(file.name)) { toast("Choose a sliced .gcode.3mf file", "bad"); return resolve(); }
     const bar = $("#pf-bar"), xhr = new XMLHttpRequest();
     bar.hidden = false; bar.firstElementChild.style.width = "0";
     xhr.open("POST", `/api/machines/${encodeURIComponent(id)}/files`);
@@ -1335,8 +1436,9 @@ document.addEventListener("click", e => {
     case "ev-filter": evFilter = id; return renderActivity();
     case "sc-spin": { const on = window.Showcase && window.Showcase.toggleSpin(); a.textContent = on ? "⏸" : "▶"; return; }
     case "sc-reset": return window.Showcase && window.Showcase.reset();
-    case "chat-clear-doc": chatState.doc = null; return syncComposers(true);
+    case "chat-clear-doc": chatState.doc = null; chatState.print = null; return syncComposers(true);
     case "suggest": { const f = document.querySelector('form.composer[data-chat=main]'); f.querySelector("textarea").value = a.dataset.text; return sendChat(f); }
+    case "step-remove": setup.steps.splice(Number(id), 1); saveSetup(); sig.product = ""; return renderProduction();
     case "setup-clear-doc": setup.docId = null; saveSetup(); return renderProduction();
     case "run-pause": return runAction(id, "pause");
     case "run-resume": return runAction(id, "resume");

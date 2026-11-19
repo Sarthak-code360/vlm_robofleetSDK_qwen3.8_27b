@@ -81,6 +81,7 @@ ROUTES = [
     ("POST", re.compile(rf"^/api/machines/{ID}/files$"), "add_machine_file"),
     ("DELETE", re.compile(rf"^/api/machines/{ID}/files/([^/]+)$"), "remove_machine_file"),
     ("POST", re.compile(rf"^/api/machines/{ID}/print$"), "print_file"),
+    ("POST", re.compile(r"^/api/machines/ensure$"), "ensure_machine"),
     ("POST", re.compile(r"^/api/zones$"), "add_zone"),
     ("POST", re.compile(r"^/api/chat$"), "chat"),
     ("POST", re.compile(r"^/api/runs$"), "start_run"),
@@ -198,11 +199,13 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                     "remove_machine": lambda: factory.remove_machine(arg),
                     "machine_files": lambda: {"files": factory.machine_files(arg)},
                     "remove_machine_file": lambda: factory.remove_machine_file(arg, urllib.parse.unquote(match.group(2))),
+                    "ensure_machine": lambda: factory.ensure_machine(str(body.get("type", ""))),
                     "print_file": lambda: factory.print_file(arg, str(body.get("file", "")), body.get("robot_id") or None),
                     "add_zone": lambda: factory.add_zone(body.get("name"), body.get("x"), body.get("y")),
                     "remove_document": lambda: factory.remove_document(arg),
                     "chat": lambda: factory.chat_message(body.get("text"), body.get("machine_id") or None,
-                                                        body.get("robot_id") or None, body.get("document_id") or None),
+                                                        body.get("robot_id") or None, body.get("document_id") or None,
+                                                        body.get("print_file") or None),
                     "start_run": lambda: factory.start_run(body),
                     "run_action": lambda: factory.set_run_status(arg, match.group(2)),
                 }
@@ -222,15 +225,14 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
 
         def _receive_print_file(self, machine_id: str) -> dict:
             """Streams a sliced file to disk (it can be large), then hands it to the factory to check and store."""
-            machine = factory.machines.get(machine_id)
-            if machine is None or not hasattr(machine, "prints_dir"):
+            if machine_id not in factory.machines:
                 raise KeyError(machine_id)
             length = int(self.headers.get("Content-Length") or 0)
             if length <= 0:
                 raise ValueError("empty upload")
             if length > MAX_PRINT_FILE_BYTES:
                 raise ValueError(f"file is larger than {MAX_PRINT_FILE_BYTES // (1024 * 1024)} MB")
-            folder = machine.prints_dir()
+            folder = factory.upload_folder(machine_id)
             folder.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(prefix=".upload-", suffix=".part", dir=folder)
             try:

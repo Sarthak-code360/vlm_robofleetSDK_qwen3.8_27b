@@ -9,8 +9,8 @@ model/*.stl
 prints/*.gcode.3mf
 __pycache__/
 *.egg-info/
-build/
-dist/
+/build/
+/dist/
 *.jpeg
 *.jpg
 *.png

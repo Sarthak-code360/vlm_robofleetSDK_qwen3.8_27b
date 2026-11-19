@@ -3,6 +3,11 @@
   "name": "Rocket Manufacturing Factory",
   "type": "rocket manufacturing factory (sounding rockets)",
   "assistant_name": "StarForge AI",
+  "assistant_instructions": [
+    "You work for a small rocket workshop. The Bambu Lab A1 is the only real (live) machine; the other machines are simulated.",
+    "Our printer uses PLA. Prints larger than 256 x 256 x 256 mm do not fit.",
+    "Answer in plain words for people who are not engineers. Use metric units."
+  ],
   "showcase": {
     "model": "../../model/rocket_assembly.glb",
     "title": "Sounding Rocket",
