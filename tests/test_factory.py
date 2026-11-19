@@ -37,7 +37,7 @@ class FakeModel:
     def __init__(self, action=None, plan=None, fail=False):
         self.action, self.plan, self.fail, self.calls = action, plan, fail, []
 
-    def chat_json(self, messages, schema, name, timeout=None):
+    def chat_json(self, messages, schema, name, timeout=None, max_tokens=None):
         self.calls.append(name)
         if self.fail:
             raise ModelError("model offline")
@@ -434,6 +434,38 @@ class MachineFilesTest(unittest.TestCase):
                 httpd.server_close()
 
 
+class ShowcaseTest(unittest.TestCase):
+    def test_static_files_and_showcase_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            glb = Path(tmp) / "rocket.glb"
+            glb.write_bytes(b"glTF" + b"\0" * 100)
+            factory = make_factory(None, showcase={"path": str(glb), "title": "Sounding Rocket"})
+            self.assertEqual(factory.state()["factory"]["showcase"]["title"], "Sounding Rocket")
+            self.assertIsNone(make_factory(None).state()["factory"]["showcase"])  # no model -> Live card
+            httpd = make_server(factory, "127.0.0.1", 0, token="secret")
+            url = f"http://127.0.0.1:{httpd.server_address[1]}"
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            try:
+                with urllib.request.urlopen(url + "/static/three/build/three.module.min.js") as r:
+                    self.assertIn("javascript", r.headers["Content-Type"])
+                for bad in ("/static/../server.py", "/static/%2e%2e/runtime.py", "/static/nope.js"):
+                    with self.assertRaises(urllib.error.HTTPError) as e:
+                        urllib.request.urlopen(url + bad)
+                    self.assertEqual(e.exception.code, 404); e.exception.close()
+                with self.assertRaises(urllib.error.HTTPError) as e:
+                    urllib.request.urlopen(url + "/api/showcase")  # token required
+                self.assertEqual(e.exception.code, 401); e.exception.close()
+                with urllib.request.urlopen(url + "/api/showcase?token=secret") as r:
+                    self.assertEqual((r.headers["Content-Type"], r.read()[:4]), ("model/gltf-binary", b"glTF"))
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+    def test_example_points_at_the_rocket_model(self):
+        factory = load_factory(EXAMPLE, simulate_machines=True)
+        self.assertTrue(factory.showcase["path"].endswith("model/rocket_assembly.glb"))
+
+
 class SimulateRobotsTest(unittest.TestCase):
     def test_file_robots_come_online(self):
         factory = make_factory(None)
@@ -560,10 +592,10 @@ class ChatTest(unittest.TestCase):
     def test_model_reply_and_production_run(self):
         answer = {"action": "start_production", "machine_id": "none", "file": "none", "robot_id": "none",
                   "from_zone": "none", "to_zone": "none", "product": "Actuator gear", "quantity": 5,
-                  "reply": "On it - 5 actuator gears coming up."}
+                  "reply": "On it - 5 actuator gears coming up. Is there anything else you'd like to know about the factory?"}
 
         class ChatModel(FakeModel):
-            def chat_json(self, messages, schema, name, timeout=None):
+            def chat_json(self, messages, schema, name, timeout=None, max_tokens=None):
                 if name == "factory_chat":
                     self.calls.append(name)
                     return dict(answer), {"model": "fake", "latency_s": 0.1}
@@ -573,6 +605,7 @@ class ChatTest(unittest.TestCase):
                                require_confirmation=False)
         reply = factory.chat_message("make 5 actuator gears")["messages"][-1]["text"]
         self.assertIn("On it", reply)
+        self.assertNotIn("anything else", reply)  # the chat-model closing line is removed
         run = next(iter(factory.runs.values()))
         self.assertEqual((run["target"], run["parts"], run["origin"]), (5, {"actuator_gear.gcode.3mf": 1}, "chat"))
         self.assertIn("factory_chat", factory.model.calls)

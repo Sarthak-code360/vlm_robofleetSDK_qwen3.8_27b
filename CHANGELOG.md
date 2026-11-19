@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-18
+
+### Added
+
+- 3D showcase on the Overview: the factory file's `showcase` model (a `.glb`) is shown in place of the Live card,
+  rotating, with drag to orbit and scroll to zoom, plus pause and reset buttons. While production runs, it shows
+  "N of M built" and a progress bar. The rocket factory shows the full rocket assembly (`model/rocket_assembly.glb`).
+  three.js is bundled, so it works without internet. API: `GET /api/showcase`, `GET /static/...`.
+
+### Changed
+
+- Faster StarForge replies, and no more "Is there anything else...?" closing lines (see 0.7.0 notes below).
+- `.gitignore` excludes large CAD exports in `model/` (`*.obj`, `*.mtl`, `*.stl`).
+
 ## [0.7.0] - 2026-11-17
 
 ### Added
@@ -22,6 +36,10 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - The Overview chat box keeps a fixed height and scrolls.
+- Faster StarForge replies: a smaller factory summary (about 40% fewer tokens), only the needed JSON fields are
+  generated, replies are capped at 400 tokens, and the example uses rule-based robot dispatch, so the model is
+  free for the chat.
+- StarForge no longer ends answers with "Is there anything else...?" (instructed, and removed in code).
 - `--simulate-machines` now simulates every machine, not only printers.
 
 ## [0.6.0] - 2026-11-17

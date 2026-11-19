@@ -3,6 +3,11 @@
   "name": "Rocket Manufacturing Factory",
   "type": "rocket manufacturing factory (sounding rockets)",
   "assistant_name": "StarForge AI",
+  "showcase": {
+    "model": "../../model/rocket_assembly.glb",
+    "title": "Sounding Rocket",
+    "caption": "Full assembly \u00b7 drag to rotate"
+  },
   "zones": {
     "Print Bay": {
       "x": 0,
@@ -60,7 +65,7 @@
     "task_battery_cost": 5
   },
   "require_confirmation": false,
-  "dispatch": "model",
+  "dispatch": "rules",
   "robot_timeout_s": 15,
   "products": {
     "Sounding Rocket": {

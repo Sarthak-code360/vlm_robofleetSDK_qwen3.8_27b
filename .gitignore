@@ -3,6 +3,9 @@ config/printer.json
 jobs/
 logs/
 data/
+model/*.obj
+model/*.mtl
+model/*.stl
 prints/*.gcode.3mf
 __pycache__/
 *.egg-info/

@@ -215,6 +215,7 @@ the browser. Robots and machines from the factory file are shown as *factory fil
 | `robot_wait_alert_s` | Alert when a finished part has waited this long for a robot (default 90). |
 | `dispatch` | `model` (Qwen chooses robots, checked in code) or `rules` (nearest suitable robot, fastest). |
 | `robot_timeout_s` | A robot with no heartbeat for this long goes `offline`, and its task goes back in the queue. |
+| `showcase` | Optional 3D model on the Overview: `{"model": "../../model/rocket_assembly.glb", "title": "...", "caption": "..."}`. Use `.glb`; convert big CAD exports (OBJ/STEP) first, and keep them under ~20 MB. |
 | `products` | The catalog: what one unit of each product needs (`parts`: job file → quantity). Used by Production and by "make 2 rockets". |
 | `machines[].type` | `3d_printer`, `cnc_machine`, `welding_station`, `composite_cell` (stage 1), `assembly_station` (2), `paint_booth` (3), `inspection_station` (4). A later stage starts only when the unit's earlier-stage parts are delivered. `stage` overrides it. |
 | `machines[].driver` | `bambu` (real 3D printer) or `simulated` (any type). `files` are the jobs it can do; `print_seconds` / `cycle_seconds` is the simulated time. |

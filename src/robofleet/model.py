@@ -56,7 +56,7 @@ class ModelClient:
         return cls(**settings)
 
     def chat(self, messages: list[dict], response_format: dict | None = None,
-             timeout: float | None = None) -> tuple[str, dict]:
+             timeout: float | None = None, max_tokens: int | None = None) -> tuple[str, dict]:
         """Sends ``messages`` and returns ``(reply_text, stats)``."""
         api_key = self.api_key
         if not api_key:
@@ -67,6 +67,8 @@ class ModelClient:
         body: dict = {"model": self.model, "messages": messages, "temperature": self.temperature}
         if response_format:
             body["response_format"] = response_format
+        if max_tokens:
+            body["max_tokens"] = max_tokens
         if not self.thinking:
             body["chat_template_kwargs"] = {"enable_thinking": False}
 
@@ -93,10 +95,12 @@ class ModelClient:
         return text or "", stats
 
     def chat_json(self, messages: list[dict], schema: dict, name: str,
-                  timeout: float | None = None) -> tuple[dict, dict]:
+                  timeout: float | None = None, max_tokens: int | None = None) -> tuple[dict, dict]:
         """Asks for a JSON object matching ``schema``. Returns ``(answer, stats)``."""
-        response_format = {"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}}
-        text, stats = self.chat(messages, response_format, timeout)
+        # strict mode (OpenAI/OpenRouter) needs every property required; llama.cpp also accepts optional ones
+        strict = set(schema.get("required", [])) == set(schema.get("properties", {}))
+        response_format = {"type": "json_schema", "json_schema": {"name": name, "strict": strict, "schema": schema}}
+        text, stats = self.chat(messages, response_format, timeout, max_tokens)
         return parse_json_reply(text), stats
 
 

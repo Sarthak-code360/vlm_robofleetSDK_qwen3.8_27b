@@ -23,6 +23,7 @@ Factory settings: ROBOFLEET_SERVER (default http://127.0.0.1:8080), ROBOFLEET_TO
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import random
@@ -164,7 +165,7 @@ def _client(args):
 
 
 def cmd_factory_serve(args) -> None:
-    from .factory import load_factory, serve
+    from .factory import load_factory, make_server, serve
 
     model = None if args.offline else ModelClient.from_env()
     try:
@@ -174,6 +175,15 @@ def cmd_factory_serve(args) -> None:
         _stop(str(e))
     except ImportError as e:
         _stop(f"{e}\n   Or run with --simulate-machines to use simulated printers.")
+    try:  # open the port before anything starts, so a busy port gives a clear message instead of a traceback
+        httpd = make_server(factory, args.host, args.port, args.token)
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise
+        _stop(f"Port {args.port} is already in use: another factory server (or another program) is running.\n"
+              f"   Either open http://localhost:{args.port}/ (it may already be your dashboard),\n"
+              f"   stop the other one (Ctrl+C in its terminal, or: fuser -k {args.port}/tcp  /  lsof -ti :{args.port} | xargs kill),\n"
+              f"   or use another port: --port {args.port + 1}")
     if args.simulate_robots:
         factory.simulate_robots()
     where = f"http://{'localhost' if args.host in {'127.0.0.1', '0.0.0.0'} else args.host}:{args.port}"
@@ -184,7 +194,7 @@ def cmd_factory_serve(args) -> None:
     print(f"  robots:    {len(factory.robots)} registered; agent robots appear online when they send heartbeats")
     print(f"  data:      {args.data_dir} (robots, machines, zones and documents added in the dashboard)")
     print(f"  events:    {args.log}\nCtrl+C to stop.", flush=True)
-    serve(factory, args.host, args.port, args.token)
+    serve(factory, args.host, args.port, args.token, httpd=httpd)
 
 
 def cmd_factory_request(args) -> None:

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Autonomous Factory</title>
+<script type="importmap">{"imports": {"three": "/static/three/build/three.module.min.js", "three/addons/": "/static/three/examples/jsm/"}}</script>
 <style>
 :root{
   color-scheme:light;
@@ -333,6 +334,21 @@ details.more summary:hover{color:var(--text)}
 .sf-last-text.alert{color:#9a3412}
 .sf-working{display:flex;align-items:center;gap:10px;color:#a99ffb;background:rgba(255,255,255,.75);border-radius:12px;padding:10px 14px}
 .live-card{display:flex;flex-direction:column;gap:16px}
+.showcase-card{padding:0;overflow:hidden;position:relative;min-height:560px;
+  background:radial-gradient(ellipse 70% 55% at 50% 60%,#ffffff 0%,#eef0f7 60%,#e3e6f0 100%)}
+.showcase-card canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;outline:none}
+.showcase-card canvas:active{cursor:grabbing}
+.sc-head{position:absolute;left:22px;top:18px;right:22px;display:flex;align-items:flex-start;gap:12px;pointer-events:none;z-index:1}
+.sc-title{font-size:20px;font-weight:700;color:var(--strong);letter-spacing:-.01em}
+.sc-cap{color:var(--muted);font-size:12.5px;margin-top:2px}
+.sc-badge{margin-left:auto;background:rgba(255,255,255,.85);border:1px solid var(--line);border-radius:99px;padding:5px 12px;font-size:12px;color:var(--text);backdrop-filter:blur(6px)}
+.sc-foot{position:absolute;left:18px;right:18px;bottom:16px;z-index:1;pointer-events:none}
+.sc-run{background:rgba(255,255,255,.88);border:1px solid var(--line);border-radius:12px;padding:10px 14px;backdrop-filter:blur(6px);font-size:13px}
+.sc-run .bar{height:6px;margin-top:8px}
+.sc-load{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px}
+.sc-controls{position:absolute;right:16px;bottom:16px;z-index:2;display:flex;gap:6px}
+.sc-controls button{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.9);cursor:pointer;color:var(--text);font-size:15px}
+.sc-controls button:hover{border-color:#bdb5fb;color:var(--accent)}
 .chat-card{display:flex;flex-direction:column;padding:22px 24px 18px}
 .chat-card .chat-scroll{flex:0 0 420px;height:420px;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:16px -8px 12px;padding:4px 8px}
 .chat-card .chat-col{max-width:none;gap:14px}
@@ -726,6 +742,25 @@ function renderAssistantState() {
   st.className = "sf-state " + (working ? "busy" : S.factory.model ? "on" : "off");
   st.textContent = working ? "Working…" : S.factory.model ? "Online" : "Limited mode";
 }
+function renderShowcase() {
+  const card = $("#live-card"), sc = S.factory.showcase;
+  if (!card.classList.contains("showcase-card")) {
+    card.className = "panel showcase-card";
+    card.innerHTML = `<div class="sc-load" id="sc-load">Loading 3D model…</div>
+      <div class="sc-head"><div><div class="sc-title" id="sc-title"></div><div class="sc-cap" id="sc-cap"></div></div><span class="sc-badge" id="sc-badge" hidden></span></div>
+      <div class="sc-foot" id="sc-foot"></div>
+      <div class="sc-controls"><button type="button" data-action="sc-spin" title="Pause / resume rotation" id="sc-spin">⏸</button><button type="button" data-action="sc-reset" title="Reset view">⟲</button></div>`;
+    const mount = () => window.Showcase.mount(card, `/api/showcase${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+    window.Showcase ? mount() : window.addEventListener("showcase-ready", mount, {once: true});
+  }
+  $("#sc-title").textContent = sc.title || "Product";
+  $("#sc-cap").textContent = sc.caption || "Drag to rotate";
+  const run = activeRun();
+  const badge = $("#sc-badge");
+  badge.hidden = !run; if (run) badge.textContent = `${run.units} of ${run.target} built`;
+  $("#sc-foot").innerHTML = run ? `<div class="sc-run"><b>${esc(run.name)}</b> · ${Math.round(run.progress_pct)}% · ${run.status === "paused" ? "paused" : "in production"}
+      <div class="bar"><i style="width:${run.progress_pct}%"></i></div></div>` : "";
+}
 function renderLive() {
   const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
   const done = S.tasks.filter(t => t.status === "done" && t.finished);
@@ -958,7 +993,7 @@ function renderOverview() {
     <button class="btn sm go" data-action="approve-job" data-id="${esc(j.id)}">Start</button></div>`).join("");
 
   renderChatTab();
-  renderLive();
+  if (S.factory.showcase) renderShowcase(); else renderLive();
   renderMap();
 }
 function machineName(id) { const m = S.machines.find(x => x.id === id); return m && m.name !== m.id ? `${m.name} (${id})` : id; }
@@ -1298,6 +1333,8 @@ document.addEventListener("click", e => {
     case "delete-file": return deleteFile(id, a.dataset.file);
     case "remove-doc": return dlgConfirm(`Delete ${id}`, `Delete document <b>${esc(id)}</b>? Work orders that reference it will no longer be able to open it.`, "Delete", () => api(`/api/documents/${encodeURIComponent(id)}`, {method: "DELETE"}));
     case "ev-filter": evFilter = id; return renderActivity();
+    case "sc-spin": { const on = window.Showcase && window.Showcase.toggleSpin(); a.textContent = on ? "⏸" : "▶"; return; }
+    case "sc-reset": return window.Showcase && window.Showcase.reset();
     case "chat-clear-doc": chatState.doc = null; return syncComposers(true);
     case "suggest": { const f = document.querySelector('form.composer[data-chat=main]'); f.querySelector("textarea").value = a.dataset.text; return sendChat(f); }
     case "setup-clear-doc": setup.docId = null; saveSetup(); return renderProduction();
@@ -1317,6 +1354,74 @@ initComposers();
 setTab(tab);
 refresh().then(() => { if (tab === "orders") buildOrderForm(); });
 setInterval(refresh, 2000);
+</script>
+
+<script type="module">
+// 3D showcase on the Overview (three.js, bundled with robofleet so it works offline)
+import * as THREE from "three";
+import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
+import {OrbitControls} from "three/addons/controls/OrbitControls.js";
+import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
+
+let view = null;
+function mount(card, url) {
+  if (view) return;
+  const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  card.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xc8cbe0, 0.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(3, 6, 4); scene.add(sun);
+  const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 10000);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  Object.assign(controls, {enableDamping: true, dampingFactor: 0.08, enablePan: false, autoRotate: true, autoRotateSpeed: 1.4});
+  let home = null, visible = true, size = null;
+
+  const frame = () => {   // camera distance that shows the whole model in this card, with a margin
+    if (!size) return;
+    const half = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const depth = Math.max(size.x, size.z) / 2;
+    const dist = Math.max((size.y / 2) / half, (Math.max(size.x, size.z) / 2) / (half * camera.aspect)) * 1.18 + depth;
+    home = new THREE.Vector3(dist * 0.5, size.y * 0.04, dist * 0.87);
+    controls.minDistance = dist * 0.15; controls.maxDistance = dist * 2.5;
+    return dist;
+  };
+  const fit = () => {
+    const w = card.clientWidth, h = card.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    if (frame()) camera.position.setLength(home.length());   // keep the whole model in view when the card resizes
+  };
+  new ResizeObserver(fit).observe(card); fit();
+  new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(card);
+
+  new GLTFLoader().load(url, gltf => {
+    const model = gltf.scene, box = new THREE.Box3().setFromObject(model);
+    size = box.getSize(new THREE.Vector3());
+    model.position.sub(box.getCenter(new THREE.Vector3()));   // centre the model on the origin
+    scene.add(model);
+    const radius = size.length() / 2;
+    camera.near = radius / 200; camera.far = radius * 30; camera.updateProjectionMatrix();
+    frame();
+    camera.position.copy(home); controls.target.set(0, 0, 0); controls.update();
+    const load = card.querySelector("#sc-load"); if (load) load.remove();
+  }, undefined, () => { const load = card.querySelector("#sc-load"); if (load) load.textContent = "3D model could not be loaded"; });
+
+  renderer.setAnimationLoop(() => {
+    if (!visible || document.hidden || !card.isConnected) return;   // no work while it is off screen
+    controls.update(); renderer.render(scene, camera);
+  });
+  view = {
+    toggleSpin: () => (controls.autoRotate = !controls.autoRotate),
+    reset: () => { if (home) { camera.position.copy(home); controls.target.set(0, 0, 0); controls.update(); } },
+  };
+}
+window.Showcase = {mount, toggleSpin: () => view && view.toggleSpin(), reset: () => view && view.reset()};
+window.dispatchEvent(new Event("showcase-ready"));
 </script>
 </body>
 </html>

@@ -24,6 +24,23 @@ CHAT_LIMIT = 300
 STATUS_WORDS = {"status", "how", "what", "which", "many", "online", "available", "doing", "progress", "report", "who"}
 
 
+_CLOSER = re.compile(
+    r"\s*(?:is there anything else|anything else (?:i can|you(?:'d| would) like)|let me know if|feel free to|"
+    r"do you (?:need|want) (?:anything|any)|would you like (?:me to|to know|anything)|how (?:else )?can i (?:help|assist)|"
+    r"if you (?:need|have) (?:anything|any (?:other|more|further)))[^.!?]*[.!?]*\s*$", re.IGNORECASE)
+
+
+def clean_reply(text: str) -> str:
+    """Drops the chat-model habit of closing every answer with 'Is there anything else...?'."""
+    text = str(text).strip()
+    for _ in range(3):
+        cleaned = _CLOSER.sub("", text).strip()
+        if cleaned == text or not cleaned:
+            break
+        text = cleaned
+    return text
+
+
 class AssistantMixin:
     """Chat for :class:`~robofleet.factory.runtime.Factory` (uses its lock, state and job/task helpers)."""
 
@@ -112,7 +129,7 @@ class AssistantMixin:
             snapshot = self._chat_briefing()
         choice, stats = self._chat_interpret(text, snapshot, machine_id, robot_id, document)
         if choice.get("action") == "start_production":
-            reply = self._chat_start_run(text, choice, document, (choice.get("reply") or "").strip())
+            reply = self._chat_start_run(text, choice, document, clean_reply(choice.get("reply") or ""))
         else:
             with self.lock:
                 reply = self._chat_act(text, choice, machine_id, robot_id, document)
@@ -128,17 +145,18 @@ class AssistantMixin:
             info = m.describe()
             holding = any(j["machine_id"] == m.id and j["status"] in {"awaiting_confirmation", "starting", "running", "done"}
                           for j in self.jobs.values())
-            machines.append({"id": m.id, "name": m.spec.get("name") or m.id, "type": info.get("type"),
-                             "zone": m.zone, "state": "holding part" if holding and info["state"] == "idle" else info["state"],
-                             "progress_pct": info.get("progress_pct"), "files": m.list_files()})
-        robots = [{"id": r["id"], "name": r["name"], "status": r["status"], "zone": r["zone"], "battery": r["battery"]}
-                  for r in self.robots.values()]
+            state = "holding part" if holding and info["state"] == "idle" else info["state"]
+            if info.get("progress_pct") is not None and info["state"] == "busy":
+                state += f" {info['progress_pct']}%"
+            machines.append({"id": m.id, "name": m.spec.get("name") or m.id, "zone": m.zone, "state": state,
+                             "files": m.list_files()})
+        # compact on purpose: every token here is read by the model on every message
+        robots = [f"{r['id']} {r['status']} {r['zone'] or '?'} {r['battery']}%" for r in self.robots.values()]
         active = [self.run_view(r) for r in self.runs.values() if r["status"] in {"running", "paused"}]
         return {
             "factory": self.config.get("name"), "type": self.site["type"], "zones": list(self.site["zones"]),
             "default_output_zone": self.default_output_zone, "machines": machines, "robots": robots,
-            "products": {k: v["description"] or ", ".join(f"{q}x {f}" for f, q in v["parts"].items())
-                         for k, v in self.products.items()},
+            "products": list(self.products),
             "production_runs": [{k: r[k] for k in ("id", "name", "status", "units", "target", "progress_pct")} for r in active],
             "jobs": {s: sum(j["status"] == s for j in self.jobs.values())
                      for s in ("awaiting_confirmation", "running", "done", "delivered", "failed")},
@@ -150,12 +168,12 @@ class AssistantMixin:
         zones = briefing["zones"]
         schema = {
             "type": "object", "additionalProperties": False,
-            "required": ["action", "machine_id", "file", "robot_id", "from_zone", "to_zone", "product", "quantity", "reply"],
+            "required": ["action", "reply"],  # the rest only when needed: fewer tokens to generate = faster replies
             "properties": {
                 "action": {"type": "string", "enum": ["run_machine", "move_item", "start_production", "answer"]},
                 "machine_id": {"type": "string", "enum": [m["id"] for m in briefing["machines"]] + [NONE]},
                 "file": {"type": "string", "enum": files + [NONE]},
-                "robot_id": {"type": "string", "enum": [r["id"] for r in briefing["robots"]] + [NONE]},
+                "robot_id": {"type": "string", "enum": list(self.robots) + [NONE]},
                 "from_zone": {"type": "string", "enum": zones + [NONE]},
                 "to_zone": {"type": "string", "enum": zones + [NONE]},
                 "product": {"type": "string"},
@@ -178,23 +196,25 @@ class AssistantMixin:
             "- move_item: a robot carries something from from_zone to to_zone.\n"
             "- start_production: make one or more complete products (product = a name from 'products' when it fits, "
             "quantity = how many). A complete product goes through every station in order.\n"
-            "- answer: a question, greeting or anything else; answer from the factory data.\n"
-            f"Use \"{NONE}\" (or 0 / empty) for fields that do not apply. 'reply' is your short, friendly message to "
-            "the user (1-3 sentences): say what you are doing, or the answer. If nothing can do the task, say what is "
-            "missing (e.g. add a machine that has the file, or add a robot). Do not invent IDs. JSON only.")
+            "- answer: a question, greeting or anything else. Factory questions: answer from the factory data. "
+            "Other questions (e.g. maths): just answer.\n"
+            "Only include the fields an action needs. 'reply' is your message to the user: short and direct, 1-2 "
+            "sentences. Never end with a follow-up question or an offer of more help (no 'Is there anything else...', "
+            "'Let me know if...'). If nothing can do a task, say what is missing (e.g. add a machine that has the file, "
+            "or add a robot). Do not invent IDs. JSON only.")
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": "Factory now:\n" + json.dumps(briefing, separators=(",", ":"))
                      + "\n\nRecent conversation:\n" + self._chat_history_text()
                      + "\n\nUser: " + text + ("\n" + " ".join(hints) if hints else "")}]
         if self.model is not None:
             try:
-                return self.model.chat_json(messages, schema, "factory_chat", timeout=300)
+                return self.model.chat_json(messages, schema, "factory_chat", timeout=300, max_tokens=400)
             except ModelError as e:
                 self._event("model", f"{self.assistant_name} model unavailable, using keyword matching: {e}")
         return self._chat_keywords(text, briefing), {"model": "keywords", "latency_s": 0}
 
     def _chat_history_text(self) -> str:
-        lines = [f"{m['role']}: {m['text'][:200]}" for m in self.chat[-9:-1] if m["kind"] == "reply" or m["role"] == "user"]
+        lines = [f"{m['role']}: {m['text'][:150]}" for m in self.chat[-7:-1] if m["kind"] == "reply" or m["role"] == "user"]
         return "\n".join(lines) or "(none)"
 
     def _chat_keywords(self, text: str, briefing: dict) -> dict:
@@ -208,9 +228,9 @@ class AssistantMixin:
         for m in briefing["machines"]:
             if m["id"].lower() in lower:
                 base["machine_id"] = m["id"]
-        for r in briefing["robots"]:
-            if re.search(rf"\b{re.escape(r['id'].lower())}\b", lower):
-                base["robot_id"] = r["id"]
+        for rid in self.robots:
+            if re.search(rf"\b{re.escape(rid.lower())}\b", lower):
+                base["robot_id"] = rid
         number = re.search(r"\b(\d{1,5})\b", lower)
         if words & {"make", "produce", "build", "manufacture"} and self.match_product(text):
             qty = int(number.group(1)) if number else 1
@@ -235,7 +255,7 @@ class AssistantMixin:
 
     def _chat_act(self, text: str, choice: dict, machine_id, robot_id, document) -> str:
         action = choice.get("action")
-        said = (choice.get("reply") or "").strip()
+        said = clean_reply(choice.get("reply") or "")
         robot_id = robot_id or (choice.get("robot_id") if choice.get("robot_id") in self.robots else None)
         if action == "answer":
             return said or self._status_summary()

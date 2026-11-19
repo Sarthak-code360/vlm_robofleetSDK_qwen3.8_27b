@@ -2,6 +2,8 @@
 
     GET    /                                 Operations dashboard
     GET    /api/state                        machines, robots, jobs, tasks, documents, events
+    GET    /api/showcase                     the 3D model shown on the Overview (factory file "showcase")
+    GET    /static/...                       bundled browser files (3D viewer)
 
     Work orders
     POST   /api/requests                     {"text", "document_id"?, "deliver_to"?, "priority"?} -> job or task
@@ -58,10 +60,14 @@ from importlib import resources
 from .runtime import MAX_DOCUMENT_BYTES, Factory
 
 MAX_PRINT_FILE_BYTES = 500 * 1024 * 1024
+STATIC_DIR = Path(__file__).parent / "static"
+STATIC_TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json",
+                ".png": "image/png", ".svg": "image/svg+xml", ".glb": "model/gltf-binary"}
 
 ID = r"([\w.-]+)"
 ROUTES = [
     ("GET", re.compile(r"^/api/state$"), "state"),
+    ("GET", re.compile(r"^/api/showcase$"), "showcase"),
     ("POST", re.compile(r"^/api/requests$"), "request"),
     ("POST", re.compile(rf"^/api/jobs/{ID}/confirm$"), "confirm"),
     ("POST", re.compile(rf"^/api/jobs/{ID}/cancel$"), "cancel"),
@@ -98,7 +104,8 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
         def log_message(self, *args):
             pass
 
-        def _send(self, code: int, body, content_type: str = "application/json", extra: dict | None = None) -> None:
+        def _send(self, code: int, body, content_type: str = "application/json", extra: dict | None = None,
+                  cache: str = "no-store") -> None:
             if isinstance(body, bytes):
                 data = body
             elif isinstance(body, str):
@@ -108,7 +115,7 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", cache)
             self.send_header("X-Content-Type-Options", "nosniff")
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
@@ -140,6 +147,8 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
             path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
             if method == "GET" and path in {"/", "/index.html"}:
                 return self._send(200, page, "text/html; charset=utf-8")
+            if method == "GET" and path.startswith("/static/"):
+                return self._static(path[len("/static/"):])
             for m, pattern, name in ROUTES:
                 match = pattern.match(path)
                 if m == method and match:
@@ -155,6 +164,11 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                     return self._send(200, factory.add_document(filename, self._raw(MAX_DOCUMENT_BYTES + 1)))
                 if name == "add_machine_file":
                     return self._send(200, self._receive_print_file(arg))
+                if name == "showcase":
+                    model = factory.showcase_path()
+                    if model is None:
+                        raise KeyError("showcase")
+                    return self._send(200, model.read_bytes(), "model/gltf-binary", cache="private, max-age=3600")
                 if name == "get_document":
                     doc = factory.documents.get(arg)
                     if doc is None:
@@ -198,6 +212,14 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
             except (ValueError, json.JSONDecodeError) as e:
                 return self._send(400, {"error": str(e)})
 
+        def _static(self, rel: str) -> None:
+            """Bundled browser files (the 3D viewer). Only files inside the package's static folder."""
+            target = (STATIC_DIR / urllib.parse.unquote(rel)).resolve()
+            if not target.is_relative_to(STATIC_DIR.resolve()) or not target.is_file():
+                return self._send(404, {"error": "not found"})
+            kind = STATIC_TYPES.get(target.suffix.lower(), "application/octet-stream")
+            return self._send(200, target.read_bytes(), kind, cache="public, max-age=86400")
+
         def _receive_print_file(self, machine_id: str) -> dict:
             """Streams a sliced file to disk (it can be large), then hands it to the factory to check and store."""
             machine = factory.machines.get(machine_id)
@@ -238,11 +260,11 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
 
 
 def serve(factory: Factory, host: str = "127.0.0.1", port: int = 8080, token: str | None = None,
-          tick_s: float = 2.0) -> None:
-    """Runs the control loop and the HTTP API until Ctrl+C."""
+          tick_s: float = 2.0, httpd: ThreadingHTTPServer | None = None) -> None:
+    """Runs the control loop and the HTTP API until Ctrl+C. Pass ``httpd`` from make_server() to bind first."""
+    httpd = httpd or make_server(factory, host, port, token)
     stop = threading.Event()
     threading.Thread(target=factory.run_forever, args=(tick_s, stop), daemon=True).start()
-    httpd = make_server(factory, host, port, token)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

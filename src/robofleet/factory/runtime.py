@@ -81,6 +81,7 @@ class Factory(AssistantMixin):
         self._chat_seq = 0
         self._alerted: dict[str, float] = {}
         self.robot_wait_alert_s = float(config.get("robot_wait_alert_s", 90))
+        self.showcase = dict(config.get("showcase") or {})  # 3D model on the Overview: model (path), title, caption
 
         self.robots: dict[str, dict] = {}
         for r in config.get("robots", []):
@@ -1117,6 +1118,12 @@ class Factory(AssistantMixin):
 
     # ------------------------------------------------------------------ view
 
+    def showcase_path(self) -> Path | None:
+        """The showcase 3D model (.glb) if the factory file names one and it exists."""
+        model = self.showcase.get("path") or self.showcase.get("model")
+        path = Path(model) if model else None
+        return path if path and path.suffix.lower() == ".glb" and path.is_file() else None
+
     def _note_machine_state(self, machine_id: str, state: str, now: float) -> None:
         history = self.machine_history.setdefault(machine_id, [])
         if not history or history[-1][1] != state:
@@ -1143,7 +1150,9 @@ class Factory(AssistantMixin):
                 "factory": {k: self.config.get(k) for k in ("name", "type", "default_output_zone")}
                 | {"require_confirmation": self.require_confirmation, "model": getattr(self.model, "model", None),
                    "dispatch": "model" if self.dispatch_with_model and self.model else "rules",
-                   "persistent": self.data_dir is not None, "assistant": self.assistant_name},
+                   "persistent": self.data_dir is not None, "assistant": self.assistant_name,
+                   "showcase": {"title": self.showcase.get("title") or "", "caption": self.showcase.get("caption") or ""}
+                   if self.showcase_path() else None},
                 "zones": self.site["zones"], "chargers": self.site["chargers"],
                 "machines": machines, "robots": robots,
                 "machine_history": {k: list(v) for k, v in self.machine_history.items() if k in self.machines},

@@ -39,6 +39,8 @@ def load_factory(path: str | Path, model: ModelClient | None = None, simulate_ma
     if config.get("default_output_zone") not in config["zones"]:
         raise ValueError(f"{path}: default_output_zone must be one of the zones")
     machines = {spec["id"]: build_machine(spec, path.parent, simulate_machines) for spec in config["machines"]}
+    if isinstance(config.get("showcase"), dict) and config["showcase"].get("model"):
+        config["showcase"]["path"] = str((path.parent / config["showcase"]["model"]).resolve())
     return Factory(config, machines, model, log_path, data_dir=data_dir, base_dir=Path.cwd(),
                    simulate_machines=simulate_machines)
 
