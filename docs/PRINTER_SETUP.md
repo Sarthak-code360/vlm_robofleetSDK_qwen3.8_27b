@@ -80,3 +80,21 @@ Machines on the same tailnet can then reach the printer's IP as if they were loc
 
 The printer uses a self-signed certificate, so robofleet does not verify it. Only use this on a network you trust.
 Anyone with the access code can control the printer, so treat it like a password.
+
+## How robofleet talks to the printer
+
+Everything happens on your local network; nothing goes through Bambu's cloud. The printer must be in
+**LAN Only + Developer Mode**, and every connection logs in as user `bblp` with the printer's **access code**.
+
+| What | Port / protocol | Used for |
+|---|---|---|
+| MQTT over TLS | 8883 | Status (state, %, time left, temperatures) every few seconds, and the "start print" command |
+| FTPS (implicit TLS) | 990 | Uploading the sliced `.gcode.3mf` onto the printer's microSD card |
+| Camera stream over TLS | 6000 | Live JPEG pictures (A1 / A1 mini / P1) |
+
+A print from the dashboard: the file is uploaded with FTPS → an MQTT `project_file` command tells the printer to
+print it from the SD card → the factory reads MQTT status until the printer reports `FINISH` → a robot task is
+created to collect the part.
+
+The printer uses a self-signed certificate, so certificate checks are off. Use this only on a trusted network.
+If the camera shows "not reachable", look for a **LAN Only Liveview** setting on the printer and turn it on.

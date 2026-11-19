@@ -217,6 +217,15 @@ pre.cmd{margin:8px 0 0;padding:10px 12px;background:#ffffff;border:1px solid var
 .file-chip .meta span{color:var(--muted);font-size:12.5px}
 .x-btn{background:none;border:0;color:var(--muted);font-size:22px;cursor:pointer;padding:0 4px;line-height:1}.x-btn:hover{color:var(--strong)}
 .parts{display:grid;gap:8px}
+.cam-panel{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(240px,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.cam-panel{grid-template-columns:minmax(0,1fr)}}
+.cam-box{position:relative;aspect-ratio:16/9;background:#0f1218;border-radius:12px;overflow:hidden;display:grid;place-items:center}
+.cam-box img{width:100%;height:100%;object-fit:contain;display:block}
+.cam-msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;color:#c9cdd6;font-size:13px;line-height:1.5}
+.cam-live{position:absolute;left:10px;top:10px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;padding:3px 8px;border-radius:99px;display:flex;gap:6px;align-items:center}
+.cam-live i{width:7px;height:7px;border-radius:50%;background:#ff4d4f}
+.cam-facts{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13.5px;margin-top:12px}
+.cam-facts dt{color:var(--muted)}.cam-facts dd{margin:0;color:var(--strong);font-weight:500}
 .step-cards{display:grid;gap:12px}
 .step-card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#fff}
 .step-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
@@ -447,6 +456,7 @@ dialog::backdrop{background:rgba(15,23,42,.35);backdrop-filter:blur(2px)}
       </div>
       <div class="panel live-card" id="live-card"></div>
     </div>
+    <div id="camera-panels"></div>
     <div class="panel mt">
       <div class="panel-head"><span class="panel-title">Factory floor</span><div class="actions legend" id="map-legend"></div></div>
       <div id="floormap"></div>
@@ -832,6 +842,59 @@ function renderLive() {
     <div class="live-robots">${robotLine}${waiting ? `<div class="live-chip warn">${waiting} part${waiting === 1 ? "" : "s"} waiting for a robot</div>` : ""}</div>`;
 }
 
+/* ------------------------------------------------------------------ printer cameras */
+const camBox = id => `<div class="cam-box"><img data-camera="${esc(id)}" alt="Live camera"><div class="cam-msg" data-camera-msg="${esc(id)}">Connecting to the camera…</div>
+  <span class="cam-live" hidden data-camera-live="${esc(id)}"><i></i>LIVE</span></div>`;
+function renderCameras() {
+  const cams = S.machines.filter(m => m.camera);
+  const box = $("#camera-panels");
+  const key = cams.map(m => m.id).join(",");
+  if (box.dataset.key !== key) {
+    box.dataset.key = key;
+    box.innerHTML = cams.map(m => `<div class="panel mt"><div class="panel-head"><span class="panel-title">${esc(m.name)} · Camera</span>
+      <span class="panel-hint">what the printer sees</span></div>
+      <div class="cam-panel">${camBox(m.id)}<div data-camera-facts="${esc(m.id)}"></div></div></div>`).join("");
+  }
+  cams.forEach(m => {
+    const el = document.querySelector(`[data-camera-facts="${CSS.escape(m.id)}"]`); if (!el) return;
+    const running = m.state === "busy", pct = m.progress_pct;
+    const job = m.job || m.printer_job;
+    el.innerHTML = `${badge("machine", m.state)}
+      <dl class="cam-facts">
+        <dt>Printing</dt><dd>${job && (running || m.printer_state === "FINISH") ? esc(fileLabel(job)) : "—"}</dd>
+        <dt>Progress</dt><dd>${pct != null ? pct + "%" : "—"}${running && m.remaining_min != null ? ` · ${m.remaining_min} min left` : ""}</dd>
+        <dt>Nozzle</dt><dd>${m.nozzle_c != null ? Math.round(m.nozzle_c) + " °C" : "—"}</dd>
+        <dt>Bed</dt><dd>${m.bed_c != null ? Math.round(m.bed_c) + " °C" : "—"}</dd>
+        <dt>Printer says</dt><dd>${esc(m.printer_state || "—")}</dd></dl>
+      ${pct != null && running ? `<div class="bar" style="height:8px;margin-top:14px"><i style="width:${pct}%"></i></div>` : ""}
+      ${m.printer_state === "FINISH" ? '<div class="alert-line">Print finished: take the part off the bed before the next print.</div>' : ""}`;
+  });
+}
+const camBusy = {};
+async function cameraTick() {   // one picture per camera, about once a second, only while it is visible
+  for (const img of document.querySelectorAll("img[data-camera]")) {
+    const id = img.dataset.camera;
+    if (camBusy[id] || !img.offsetParent || document.hidden) continue;
+    camBusy[id] = true;
+    const msg = document.querySelector(`[data-camera-msg="${CSS.escape(id)}"]`), live = document.querySelector(`[data-camera-live="${CSS.escape(id)}"]`);
+    try {
+      const r = await fetch(`/api/machines/${encodeURIComponent(id)}/camera.jpg`, {headers: AUTH, cache: "no-store"});
+      if (r.ok) {
+        const url = URL.createObjectURL(await r.blob());
+        const old = img.src; img.src = url; if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+        if (msg) msg.hidden = true; if (live) live.hidden = false;
+      } else {
+        const j = await r.json().catch(() => ({}));
+        if (msg) { msg.hidden = false; msg.textContent = (j.error || "Camera not available") +
+          (r.status === 503 && !/connecting/.test(j.error || "") ? ". If the printer has a \"LAN Only Liveview\" setting, turn it on." : ""); }
+        if (live) live.hidden = true;
+      }
+    } catch (e) { if (msg) { msg.hidden = false; msg.textContent = "Camera not available"; } }
+    finally { camBusy[id] = false; }
+  }
+}
+setInterval(cameraTick, 1000);
+
 /* ------------------------------------------------------------------ production */
 const setup = (() => { try { return JSON.parse(store.get("rf.setup") || "{}") || {}; } catch (e) { return {}; } })();
 const saveSetup = () => store.set("rf.setup", JSON.stringify(setup));
@@ -1088,6 +1151,7 @@ function renderOverview() {
     <button class="btn sm go" data-action="approve-job" data-id="${esc(j.id)}">Start</button></div>`).join("");
 
   renderChatTab();
+  renderCameras();
   if (S.factory.showcase) renderShowcase(); else renderLive();
   renderMap();
 }
@@ -1346,6 +1410,7 @@ async function dlgMachineFiles(id) {
   const m = S.machines.find(x => x.id === id); if (!m) return;
   openDialog(m.name, `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">${badge("machine", m.state)}<span class="muted">${esc(m.zone)} · ${esc(MTYPES[m.type] || m.type)}</span></div>
+    ${m.camera ? `<div style="margin-bottom:16px">${camBox(m.id)}</div>` : ""}
     ${m.type === "3d_printer" ? `<label class="drop" id="pf-drop"><input type="file" accept=".3mf" id="pf-input" hidden>
       <b>Upload a print file</b> from this computer<br><span class="faint">Sliced in Bambu Studio: File → Export → Export plate sliced file (.gcode.3mf)</span>
       <div class="upload-bar" id="pf-bar" hidden><i></i></div></label>`

@@ -49,6 +49,10 @@ class Machine:
     def poll(self) -> str:
         raise NotImplementedError
 
+    def camera_frame(self):
+        """(jpeg bytes or None, age in seconds, error) for machines with a camera; None if it has none."""
+        return None
+
 
 class _PrinterBase(Machine):
     type = "3d_printer"
@@ -183,6 +187,12 @@ class BambuMachine(_PrinterBase):
         self._started: float | None = None
         self._seen_active = False
         self._file: str | None = None
+        from ..printers.camera import BambuCamera
+
+        self.camera = BambuCamera(self.config["ip"], self.config["access_code"]) if spec.get("camera", True) else None
+
+    def camera_frame(self):
+        return self.camera.frame() if self.camera else None
 
     def _refresh(self, force: bool = False) -> dict:
         with self._lock:
@@ -208,6 +218,8 @@ class BambuMachine(_PrinterBase):
     def describe(self) -> dict:
         info = super().describe()
         status = self._status
+        info.update(nozzle_c=status.get("nozzle_temper"), bed_c=status.get("bed_temper"),
+                    printer_job=status.get("subtask_name"), camera=self.camera is not None)
         info.update(printer_state=status.get("gcode_state"), progress_pct=status.get("mc_percent"),
                     remaining_min=status.get("mc_remaining_time"), job=self._file)
         if self._error:

@@ -6,7 +6,8 @@ data/
 model/*.obj
 model/*.mtl
 model/*.stl
-prints/*.gcode.3mf
+prints/*
+!prints/.keep
 __pycache__/
 *.egg-info/
 /build/

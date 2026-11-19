@@ -1066,6 +1066,12 @@ class Factory(AssistantMixin):
         self.machine_source[mid] = "auto"
         return self._machine_view(self.machines[mid])
 
+    def camera_frame(self, machine_id: str):
+        machine = self.machines.get(machine_id)
+        if machine is None:
+            raise KeyError(machine_id)
+        return machine.camera_frame()
+
     def _machine_view(self, m: Machine) -> dict:
         info = m.describe() | {"files": m.list_files()}
         info.update(name=m.spec.get("name") or m.id, live=is_live(m), type_label=machine_label(m.type),

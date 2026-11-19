@@ -461,6 +461,32 @@ class ShowcaseTest(unittest.TestCase):
                 httpd.shutdown()
                 httpd.server_close()
 
+    def test_camera_endpoint(self):
+        class CameraPrinter(SimulatedPrinter):
+            frame = (b"\xff\xd8jpeg\xff\xd9", 0.5, None)
+
+            def camera_frame(self):
+                return self.frame
+
+        config = copy.deepcopy(CONFIG)
+        factory = Factory(config, {"PRINTER-1": CameraPrinter(config["machines"][0], Path("."))}, None)
+        httpd = make_server(factory, "127.0.0.1", 0)
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/api/machines/PRINTER-1/camera.jpg"
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            with urllib.request.urlopen(url) as r:
+                self.assertEqual((r.headers["Content-Type"], r.read()), ("image/jpeg", b"\xff\xd8jpeg\xff\xd9"))
+            CameraPrinter.frame = (None, None, "camera not reachable (timed out)")
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(url)
+            self.assertEqual(e.exception.code, 503)
+            self.assertIn("not reachable", json.load(e.exception)["error"]); e.exception.close()
+            plain = make_factory(None)
+            self.assertIsNone(plain.camera_frame("PRINTER-1"))  # simulated printers have no camera
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
     def test_example_points_at_the_rocket_model(self):
         factory = load_factory(EXAMPLE, simulate_machines=True)
         self.assertTrue(factory.showcase["path"].endswith("model/rocket_assembly.glb"))

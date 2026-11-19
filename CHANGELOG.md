@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Live printer camera (Bambu Lab A1 / A1 mini / P1, LAN mode, port 6000): `robofleet.printers.camera.BambuCamera`
+  reads the JPEG stream only while someone is watching. `GET /api/machines/<id>/camera.jpg` returns the newest
+  picture. The Overview shows a camera panel with the printer's state, job, progress, time left and temperatures,
+  and the camera is also in Settings → Machines → the printer. Set `"camera": false` on a machine to turn it off.
+
 ## [0.9.0] - 2026-11-19
 
 ### Added

@@ -46,3 +46,39 @@ class ChooserTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CameraTest(unittest.TestCase):
+    def test_reads_frames_from_a_fake_printer_camera(self):
+        import socket
+        import struct
+        import threading
+        import time
+
+        from robofleet.printers.camera import BambuCamera, auth_packet
+
+        jpeg = b"\xff\xd8\xff\xe0" + b"picture" + b"\xff\xd9"
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        seen = {}
+
+        def printer():
+            conn, _ = server.accept()
+            with conn:
+                seen["auth"] = conn.recv(80)
+                for payload in (b"not a jpeg", jpeg, jpeg):
+                    conn.sendall(struct.pack("<IIII", len(payload), 0, 1, 0) + payload)
+                time.sleep(1)
+
+        threading.Thread(target=printer, daemon=True).start()
+        camera = BambuCamera("127.0.0.1", "12345678", port=server.getsockname()[1], use_tls=False)
+        camera.frame()  # starts the stream
+        end = time.time() + 5
+        while camera.frame()[0] is None and time.time() < end:
+            time.sleep(0.05)
+        picture, age, error = camera.frame()
+        self.assertEqual(picture, jpeg)  # the broken frame was skipped
+        self.assertEqual(seen["auth"], auth_packet("12345678"))
+        self.assertEqual(len(seen["auth"]), 80)
+        server.close()

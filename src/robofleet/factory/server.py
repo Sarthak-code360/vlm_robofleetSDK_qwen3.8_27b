@@ -3,6 +3,7 @@
     GET    /                                 Operations dashboard
     GET    /api/state                        machines, robots, jobs, tasks, documents, events
     GET    /api/showcase                     the 3D model shown on the Overview (factory file "showcase")
+    GET    /api/machines/<id>/camera.jpg     newest camera picture of a printer (Bambu A1/P1: port 6000)
     GET    /static/...                       bundled browser files (3D viewer)
 
     Work orders
@@ -82,6 +83,7 @@ ROUTES = [
     ("DELETE", re.compile(rf"^/api/machines/{ID}/files/([^/]+)$"), "remove_machine_file"),
     ("POST", re.compile(rf"^/api/machines/{ID}/print$"), "print_file"),
     ("POST", re.compile(r"^/api/machines/ensure$"), "ensure_machine"),
+    ("GET", re.compile(rf"^/api/machines/{ID}/camera\.jpg$"), "camera"),
     ("POST", re.compile(r"^/api/zones$"), "add_zone"),
     ("POST", re.compile(r"^/api/chat$"), "chat"),
     ("POST", re.compile(r"^/api/runs$"), "start_run"),
@@ -165,6 +167,14 @@ def make_server(factory: Factory, host: str = "127.0.0.1", port: int = 8080, tok
                     return self._send(200, factory.add_document(filename, self._raw(MAX_DOCUMENT_BYTES + 1)))
                 if name == "add_machine_file":
                     return self._send(200, self._receive_print_file(arg))
+                if name == "camera":
+                    result = factory.camera_frame(arg)
+                    if result is None:
+                        return self._send(404, {"error": "this machine has no camera"})
+                    jpeg, age, error = result
+                    if jpeg is None or (age is not None and age > 20):
+                        return self._send(503, {"error": error or "connecting to the camera…"})
+                    return self._send(200, jpeg, "image/jpeg", {"X-Frame-Age": f"{age:.1f}"})
                 if name == "showcase":
                     model = factory.showcase_path()
                     if model is None:
