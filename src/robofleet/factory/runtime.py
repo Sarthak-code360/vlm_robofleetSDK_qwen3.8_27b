@@ -573,8 +573,9 @@ class Factory(AssistantMixin):
             self.runs[run["id"]] = run
             self._event("run", f"Production run {run['id']} started: {target} × {name} "
                                f"({', '.join(f'{q}× {f}' for f, q in clean.items())} per unit)", run_id=run["id"])
+            view = self.run_view(run)
         self.tick_soon()
-        return self.run_view(run)
+        return view
 
     def _run_steps(self, raw) -> list[dict]:
         """Validates the machines chosen for a run and their inputs. Each step = one machine and its job per unit."""
@@ -699,12 +700,26 @@ class Factory(AssistantMixin):
                 in_flight[j["file"]] += 1
         units = min(delivered[f] // q for f, q in run["parts"].items())
         needed = {f: run["target"] * q for f, q in run["parts"].items()}
-        parts_done = sum(min(delivered[f], needed[f]) for f in needed)
+        # parts being made count partly: making = up to 90% of a part, waiting for a robot = 95%, delivered = 100%
+        active = {f: [] for f in run["parts"]}
+        partial = {f: 0.0 for f in run["parts"]}
+        for j in jobs:
+            if j["status"] not in HOLDING_JOB or j["file"] not in active:
+                continue
+            pct, left = (None, None)
+            machine = self.machines.get(j["machine_id"])
+            if j["status"] == "running" and machine is not None:
+                pct, left = machine.job_progress()
+            share = 0.95 if j["status"] == "done" else 0.9 * (pct or 0) / 100 if j["status"] == "running" else 0.0
+            partial[j["file"]] += share
+            active[j["file"]].append({"job_id": j["id"], "machine_id": j["machine_id"], "status": j["status"],
+                                      "pct": pct, "minutes_left": left})
+        parts_done = sum(min(delivered[f] + partial[f], needed[f]) for f in needed)
         stages = run.get("stages") or {}
         order = sorted(run["parts"], key=lambda f: (stages.get(f, 1), f))
         return dict(run, units=min(units, run["target"]), progress_pct=round(100 * parts_done / sum(needed.values()), 1),
                     part_status=[{"file": f, "per_unit": run["parts"][f], "delivered": delivered[f], "stage": stages.get(f, 1),
-                                  "in_production": in_flight[f], "needed": needed[f]} for f in order],
+                                  "in_production": in_flight[f], "needed": needed[f], "active": active[f]} for f in order],
                     jobs_total=len(jobs), failures=sum(j["status"] in {"failed", "delivery_failed"} for j in jobs))
 
     def tick_soon(self) -> None:

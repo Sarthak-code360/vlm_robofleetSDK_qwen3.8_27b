@@ -53,6 +53,10 @@ class Machine:
         """(jpeg bytes or None, age in seconds, error) for machines with a camera; None if it has none."""
         return None
 
+    def job_progress(self) -> tuple[float | None, float | None]:
+        """(percent done, minutes left) of the current job, from memory only (no network). (None, None) = unknown."""
+        return None, None
+
 
 class _PrinterBase(Machine):
     type = "3d_printer"
@@ -108,6 +112,12 @@ class _TimedJob:
 
     def poll(self) -> str:
         return "done" if self._progress() >= 1 else "running"
+
+    def job_progress(self):
+        if self._started is None:
+            return None, None
+        left = max(0.0, self.print_seconds * (1 - self._progress())) / 60
+        return round(self._progress() * 100, 1), round(left, 1)
 
 
 class SimulatedPrinter(_TimedJob, _PrinterBase):
@@ -193,6 +203,13 @@ class BambuMachine(_PrinterBase):
 
     def camera_frame(self):
         return self.camera.frame() if self.camera else None
+
+    def job_progress(self):
+        if self._started is None:
+            return None, None
+        if not self._seen_active:  # the printer still shows the previous print's 100% until it starts
+            return 0.0, None
+        return self._status.get("mc_percent"), self._status.get("mc_remaining_time")
 
     def _refresh(self, force: bool = False) -> dict:
         with self._lock:

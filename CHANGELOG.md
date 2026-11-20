@@ -12,6 +12,14 @@ All notable changes to this project are documented here. The format follows
   picture. The Overview shows a camera panel with the printer's state, job, progress, time left and temperatures,
   and the camera is also in Settings → Machines → the printer. Set `"camera": false` on a machine to turn it off.
 
+### Fixed
+
+- Production progress now moves while a part is being made. It used to stay at 0% and jump to 100% when the part
+  was delivered. A part counts its machine's progress (up to 90%), 95% while waiting for a robot, and 100% when
+  delivered. The run panel shows a "Now" column ("Printing 38% · 1 min left"), and the time remaining uses the
+  printer's own estimate when everything left is already on a machine. Machines report this through
+  `job_progress()`, without extra network calls.
+
 ## [0.9.0] - 2026-11-19
 
 ### Added

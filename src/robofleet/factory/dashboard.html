@@ -958,7 +958,7 @@ function renderProduction() {
       const rows = (run.steps && run.steps.length)
         ? run.steps.map(st => `<b>${esc(st.label)}</b>${st.live ? ' <span class="badge s-green">live</span>' : ""}<br><span class="muted">${esc(fileLabel(st.job))}${Object.entries(st.inputs).filter(([k]) => k !== "file").map(([k, v]) => ` · ${esc(v)}`).join("")}</span>`).join("<br>")
         : Object.entries(run.parts).map(([f, q]) => `${q}× ${esc(fileLabel(f))}`).join("<br>");
-      $("#setup-product").innerHTML = `<dl class="kv" style="margin:0"><dt>Product</dt><dd>${esc(run.name)}</dd><dt>Target</dt><dd>${run.target} units</dd>
+      $("#setup-product").innerHTML = `<dl class="kv" style="margin:0"><dt>Product</dt><dd>${esc(run.name)}</dd><dt>Target</dt><dd>${run.target} unit${run.target === 1 ? "" : "s"}</dd>
         <dt>Machines</dt><dd style="white-space:normal">${rows}</dd><dt>Machine starts</dt><dd>${run.approve_each_job ? "Approved by an operator" : "Automatic"}</dd></dl>`;
     } else {
       $("#setup-product").innerHTML = `
@@ -1057,6 +1057,15 @@ function uploadMachineFile(machineId, file, onProgress) {
   });
 }
 
+function nowText(p) {
+  if (!p.active.length) return p.delivered >= p.needed ? '<span class="faint">done</span>' : '<span class="faint">waiting</span>';
+  return p.active.map(j => {
+    const m = S.machines.find(x => x.id === j.machine_id) || {}, verb = m.type === "3d_printer" ? "Printing" : "Working";
+    if (j.status === "done") return "Waiting for robot";
+    if (j.status !== "running") return j.status === "awaiting_confirmation" ? "Needs approval" : "Starting…";
+    return `${verb} ${j.pct != null ? Math.round(j.pct) + "%" : ""}${j.minutes_left != null ? ` · ${Math.round(j.minutes_left)} min left` : ""}`;
+  }).join("<br>");
+}
 function renderRunPanel(run) {
   if (!run) {
     $("#run-panel").innerHTML = `<div class="empty-run">${COG.replace("<svg", '<svg style="width:64px;height:64px;stroke:#c9c4f7"')}
@@ -1068,7 +1077,12 @@ function renderRunPanel(run) {
   const partsDone = run.part_status.reduce((a, p) => a + Math.min(p.delivered, p.needed), 0);
   const partsAll = run.part_status.reduce((a, p) => a + p.needed, 0);
   const rate = elapsed > 0 && partsDone ? partsDone / elapsed : 0;
-  const eta = run.status === "completed" ? "Done" : rate ? dur((partsAll - partsDone) / rate) : "—";
+  // when everything left is already on a machine, the machines' own time estimates are the best guess
+  const queued = run.part_status.reduce((a, p) => a + Math.max(0, p.needed - p.delivered - p.in_production), 0);
+  const lefts = run.part_status.flatMap(p => p.active.map(a => a.minutes_left)).filter(x => x != null);
+  const eta = run.status === "completed" ? "Done"
+    : !queued && lefts.length ? dur(Math.max(...lefts) * 60 + 30)
+    : rate ? dur((partsAll - partsDone) / rate) : "—";
   const uph = elapsed > 0 ? run.units / (elapsed / 3600) : 0;
   const robotsBusy = S.robots.filter(r => r.status === "busy").length;
   const runJobs = new Set(S.jobs.filter(j => j.run_id === run.id).map(j => j.id));
@@ -1095,9 +1109,9 @@ function renderRunPanel(run) {
       <div><span>Throughput</span><b>${uph >= 10 ? Math.round(uph) : uph.toFixed(1)} /h</b></div>
       <div><span>Time remaining</span><b>${eta}</b></div>
       <div><span>Robots working</span><b>${robotsBusy} / ${S.robots.filter(r => ONLINE.has(r.status)).length}</b></div></div>
-    <div class="mt" style="margin-top:18px">${table(["Step", "Part", "Per unit", "Done", "Working", ""], run.part_status.map(p => `<tr>
-      <td class="muted">${p.stage}. ${esc(STAGE_LABEL[p.stage] || "")}</td><td><b style="font-weight:500;color:var(--strong)">${esc(fileLabel(p.file))}</b></td><td>${p.per_unit}</td><td>${p.delivered} / ${p.needed}</td><td>${p.in_production}</td>
-      <td style="width:30%"><div class="part-bar"><i style="width:${100 * Math.min(1, p.delivered / p.needed)}%"></i></div></td></tr>`), "")}</div>
+    <div class="mt" style="margin-top:18px">${table(["Step", "Part", "Per unit", "Done", "Now", ""], run.part_status.map(p => `<tr>
+      <td class="muted">${p.stage}. ${esc(STAGE_LABEL[p.stage] || "")}</td><td><b style="font-weight:500;color:var(--strong)">${esc(fileLabel(p.file))}</b></td><td>${p.per_unit}</td><td>${p.delivered} / ${p.needed}</td><td>${nowText(p)}</td>
+      <td style="width:30%"><div class="part-bar"><i style="width:${100 * Math.min(1, (p.delivered + p.active.reduce((x, j) => x + (j.status === "done" ? 0.95 : 0.9 * (j.pct || 0) / 100), 0)) / p.needed)}%"></i></div></td></tr>`), "")}</div>
     <div style="margin-top:18px"><div class="muted" style="font-size:12px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Live activity</div>
       <div class="feed">${feed.length ? feed.map(e => `<div><time>${fmtTime(e.ts)}</time><span>${esc(e.text)}</span></div>`).join("") : '<span class="faint">Waiting for the first job…</span>'}</div></div>
     ${run.failures ? `<div class="muted" style="margin-top:12px;font-size:12px">${run.failures} failed job(s) were retried automatically.</div>` : ""}`;

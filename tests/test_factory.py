@@ -622,6 +622,24 @@ class ProductionRunTest(unittest.TestCase):
         self.assertEqual(view["jobs_total"], 4)  # exactly 2 housings + 2 gears, nothing extra
         self.assertEqual(sum(1 for j in factory.jobs.values() if j["status"] == "delivered"), 4)
 
+    def test_progress_moves_while_the_part_is_being_made(self):
+        machines = [dict(CONFIG["machines"][0], print_seconds=1.0)]
+        factory = make_factory(None, machines=machines)
+        run = factory.start_run({"name": "Gear", "target": 1, "approve_each_job": False,
+                                 "parts": {"actuator_gear.gcode.3mf": 1}})
+        self.assertEqual(run["progress_pct"], 0)
+        self.assertTrue(wait_for(lambda: any(j["status"] == "running" for j in factory.jobs.values())))
+        seen = []
+        for _ in range(8):
+            time.sleep(0.1)
+            view = factory.run_view(factory.runs[run["id"]])
+            seen.append(view["progress_pct"])
+        active = view["part_status"][0]["active"][0]
+        self.assertEqual(active["status"], "running")
+        self.assertGreater(active["pct"], 0)
+        self.assertIsNotNone(active["minutes_left"])
+        self.assertTrue(0 < seen[0] < seen[-1] <= 90, seen)  # climbs smoothly, not 0 then 100
+
     def test_one_machine_never_holds_two_parts(self):
         factory = make_factory(None)
         factory.start_run({"name": "Actuator", "target": 3, "approve_each_job": False,
